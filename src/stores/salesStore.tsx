@@ -88,8 +88,16 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const getSaleByInvoice = (invoiceNumber: string) => {
-    const clean = invoiceNumber.trim().toUpperCase();
-    return sales.find((s) => s.invoiceNumber.toUpperCase() === clean);
+    const clean = invoiceNumber.trim().toUpperCase().replace(/^\*+|\*+$/g, '');
+    return sales.find((s) => {
+      const inv = s.invoiceNumber.toUpperCase();
+      return (
+        inv === clean ||
+        inv === `INV-${clean}` ||
+        inv.replace(/[^0-9]/g, '') === clean.replace(/[^0-9]/g, '') ||
+        s.id.toUpperCase() === clean
+      );
+    });
   };
 
   return (

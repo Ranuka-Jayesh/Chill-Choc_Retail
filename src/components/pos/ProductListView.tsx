@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Product, ConfectionCategory } from '@/types';
 import { CategoryFilter } from './CategoryFilter';
 import { POSSearch } from './POSSearch';
-import { LayoutGrid, List, Plus, SearchX } from 'lucide-react';
+import { Plus, SearchX } from 'lucide-react';
 
 interface ProductListViewProps {
   products: Product[];
@@ -38,41 +38,18 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           onSearchChange={onSearchChange}
           products={allProducts}
           inputRef={searchInputRef}
+          viewMode={viewMode}
+          onToggleViewMode={() => setViewMode((prev) => (prev === 'grid' ? 'list' : 'grid'))}
         />
 
-        {/* Category Pills & View Mode Toggle */}
-        <div className="mt-2.5 flex items-center justify-between gap-2">
-          <div className="flex-1 overflow-x-auto scrollbar-none no-scrollbar">
+        {/* Category Pills Header (Full-width horizontal scroll) */}
+        <div className="mt-2 flex items-center">
+          <div className="w-full overflow-x-auto scrollbar-none no-scrollbar">
             <CategoryFilter
               selectedCategory={selectedCategory}
               onSelectCategory={onSelectCategory}
               categoryCounts={categoryCounts}
             />
-          </div>
-
-          <div className="flex items-center rounded-lg bg-zinc-100 p-0.5 border border-zinc-200 flex-shrink-0">
-            <button
-              onClick={() => setViewMode('list')}
-              className={`p-1 rounded-md transition-colors ${
-                viewMode === 'list'
-                  ? 'bg-black text-white shadow-2xs'
-                  : 'text-zinc-500 hover:text-black'
-              }`}
-              title="List View"
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`p-1 rounded-md transition-colors ${
-                viewMode === 'grid'
-                  ? 'bg-black text-white shadow-2xs'
-                  : 'text-zinc-500 hover:text-black'
-              }`}
-              title="3-Column Grid View"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-            </button>
           </div>
         </div>
       </div>
@@ -91,15 +68,16 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           /* Minimal List View with Confection Images */
           <div className="space-y-1">
             {products.map((product) => {
-              const isOutOfStock = product.stock <= 0;
-              const isLowStock = !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
+              const isUnavailable = product.isAvailable === false;
+              const isOutOfStock = !isUnavailable && product.stock <= 0;
+              const isLowStock = !isUnavailable && !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
 
               return (
                 <div
                   key={product.id}
-                  onClick={() => !isOutOfStock && onAddToCart(product)}
+                  onClick={() => !isOutOfStock && !isUnavailable && onAddToCart(product)}
                   className={`group flex items-center justify-between p-2 rounded-xl border transition-all duration-150 ${
-                    isOutOfStock
+                    isUnavailable || isOutOfStock
                       ? 'bg-zinc-50 border-dashed border-zinc-200 opacity-50 cursor-not-allowed'
                       : 'bg-white border-zinc-200 hover:border-[#FF5500] hover:bg-zinc-50/60 cursor-pointer active:scale-[0.99]'
                   }`}
@@ -132,6 +110,11 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                         <h4 className="text-xs font-bold text-zinc-900 truncate group-hover:text-[#FF5500] transition-colors">
                           {product.name}
                         </h4>
+                        {isUnavailable && (
+                          <span className="px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-700 text-[9px] font-bold">
+                            Unavailable
+                          </span>
+                        )}
                         {isLowStock && (
                           <span className="px-1.5 py-0.2 rounded bg-orange-100 text-[#FF5500] text-[9px] font-bold">
                             {product.stock} left
@@ -152,7 +135,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   </div>
 
                   {/* Price & Add Action */}
-                  <div className="flex items-center gap-2 flex-shrink-0 pl-2">
+                  <div className="flex items-center gap-1.5 flex-shrink-0 pl-2">
                     <span className="text-xs font-black text-black font-mono tabular-numbers">
                       Rs. {product.price.toLocaleString('en-LK', { minimumFractionDigits: 2 })}
                     </span>
@@ -171,15 +154,16 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           /* Minimal Compact 3-Column Grid View with Real Images */
           <div className="grid grid-cols-3 gap-1.5">
             {products.map((product) => {
-              const isOutOfStock = product.stock <= 0;
-              const isLowStock = !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
+              const isUnavailable = product.isAvailable === false;
+              const isOutOfStock = !isUnavailable && product.stock <= 0;
+              const isLowStock = !isUnavailable && !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
 
               return (
                 <div
                   key={product.id}
-                  onClick={() => !isOutOfStock && onAddToCart(product)}
+                  onClick={() => !isOutOfStock && !isUnavailable && onAddToCart(product)}
                   className={`group p-1.5 rounded-xl border flex flex-col justify-between transition-all duration-150 select-none ${
-                    isOutOfStock
+                    isUnavailable || isOutOfStock
                       ? 'bg-zinc-50 border-dashed border-zinc-200 opacity-50 cursor-not-allowed'
                       : 'bg-white border-zinc-200 hover:border-[#FF5500] hover:shadow-xs cursor-pointer active:scale-[0.97]'
                   }`}
@@ -206,14 +190,20 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                       {product.brand ? product.brand.substring(0, 2).toUpperCase() : 'CC'}
                     </div>
 
-                    {/* Stock Badges */}
-                    {isOutOfStock && (
+                    {/* Stock & Availability Badges */}
+                    {isUnavailable ? (
+                      <div className="absolute inset-0 bg-black/65 backdrop-blur-[0.5px] flex items-center justify-center">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-white">
+                          Unavailable
+                        </span>
+                      </div>
+                    ) : isOutOfStock ? (
                       <div className="absolute inset-0 bg-black/60 backdrop-blur-[0.5px] flex items-center justify-center">
                         <span className="text-[8px] font-black uppercase tracking-wider text-white">
                           Out
                         </span>
                       </div>
-                    )}
+                    ) : null}
                     {isLowStock && (
                       <div className="absolute top-1 right-1">
                         <span className="px-1 py-0.2 rounded bg-orange-100 text-[#FF5500] text-[8px] font-bold shadow-2xs">

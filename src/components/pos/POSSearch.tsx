@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Search, ScanLine, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, X, LayoutGrid, List } from 'lucide-react';
 import { Product } from '@/types';
 import { useCart } from '@/stores/cartStore';
 import { BarcodeNotFoundModal } from '@/components/modals/BarcodeNotFoundModal';
@@ -9,6 +10,8 @@ interface POSSearchProps {
   onSearchChange: (query: string) => void;
   products: Product[];
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  viewMode?: 'list' | 'grid';
+  onToggleViewMode?: () => void;
 }
 
 export const POSSearch: React.FC<POSSearchProps> = ({
@@ -16,7 +19,10 @@ export const POSSearch: React.FC<POSSearchProps> = ({
   onSearchChange,
   products,
   inputRef,
+  viewMode = 'grid',
+  onToggleViewMode,
 }) => {
+  const navigate = useNavigate();
   const { addItem } = useCart();
   const [failedBarcode, setFailedBarcode] = useState<string | null>(null);
 
@@ -25,8 +31,20 @@ export const POSSearch: React.FC<POSSearchProps> = ({
       const term = searchQuery.trim();
       if (!term) return;
 
+      const cleanTerm = term.replace(/^\*+|\*+$/g, '').trim();
+
+      // Check if it's an invoice barcode
+      if (
+        cleanTerm.toUpperCase().startsWith('INV-') ||
+        cleanTerm.toUpperCase().startsWith('CC-')
+      ) {
+        onSearchChange('');
+        navigate(`/cashier/sales-history?invoice=${encodeURIComponent(cleanTerm)}`);
+        return;
+      }
+
       // 1. Try exact barcode match
-      const barcodeMatch = products.find((p) => p.barcode === term);
+      const barcodeMatch = products.find((p) => p.barcode === cleanTerm || p.barcode === term);
       if (barcodeMatch) {
         addItem(barcodeMatch);
         onSearchChange('');
@@ -60,13 +78,15 @@ export const POSSearch: React.FC<POSSearchProps> = ({
 
   return (
     <>
-      <div className="relative w-full">
-        {/* Search & Scanner Input Container */}
-        <div className="relative flex items-center">
-          <div className="absolute left-3 text-zinc-400 pointer-events-none">
+      <div className="relative w-full select-none">
+        {/* Sleek White Pill Search Bar with Orange Border & Integrated Multifunctional View Toggle */}
+        <div className="relative flex items-center h-10 sm:h-10.5 bg-white rounded-full pl-3.5 pr-[3px] border-2 border-[#FF5500] shadow-xs transition-all focus-within:ring-4 focus-within:ring-[#FF5500]/20 focus-within:shadow-md">
+          {/* Search Icon */}
+          <div className="text-[#FF5500] pointer-events-none flex-shrink-0 mr-2 flex items-center justify-center">
             <Search className="w-4 h-4" />
           </div>
 
+          {/* Search Input */}
           <input
             ref={inputRef}
             id="pos-search-input"
@@ -74,25 +94,43 @@ export const POSSearch: React.FC<POSSearchProps> = ({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Scan barcode or search confections... (F1)"
-            className="w-full h-10 pl-9 pr-20 rounded-xl bg-white border border-zinc-200 text-xs font-semibold text-black placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-[#FF5500] transition-all"
+            placeholder="Search products..."
+            className="w-full bg-transparent text-xs sm:text-sm font-semibold text-zinc-900 placeholder:text-zinc-400 focus:outline-none min-w-0 caret-[#FF5500]"
           />
 
-          <div className="absolute right-2.5 flex items-center gap-1.5">
+          {/* Right Action Controls: Clear Button & Circular Multifunctional View Toggle */}
+          <div className="flex items-center gap-1.5 flex-shrink-0 ml-1">
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => onSearchChange('')}
-                className="p-1 rounded-md text-zinc-400 hover:text-black transition-colors"
+                className="p-1 rounded-full text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors cursor-pointer"
                 title="Clear search"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3.5 h-3.5 text-[#FF5500]" />
               </button>
             )}
 
-            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-700 text-[10px] font-mono font-bold">
-              <ScanLine className="w-3 h-3 text-[#FF5500]" />
-              <span>F1</span>
-            </div>
+            {/* Multifunctional View Mode Toggle Button (Switches between 3-Column Grid and List View) */}
+            {onToggleViewMode && (
+              <button
+                type="button"
+                onClick={onToggleViewMode}
+                className="w-[30px] h-[30px] sm:w-8 sm:h-8 aspect-square rounded-full bg-black hover:bg-zinc-800 text-white inline-flex items-center justify-center p-0 m-0 shadow-xs hover:shadow-sm transition-all active:scale-95 cursor-pointer flex-shrink-0 group"
+                title={
+                  viewMode === 'grid'
+                    ? 'Grid view active • Click to switch to List view'
+                    : 'List view active • Click to switch to Grid view'
+                }
+                aria-label="Toggle Grid and List View"
+              >
+                {viewMode === 'grid' ? (
+                  <LayoutGrid className="w-4 h-4 text-white stroke-[2.3] group-hover:scale-110 transition-transform duration-150 block shrink-0" />
+                ) : (
+                  <List className="w-4 h-4 text-white stroke-[2.3] group-hover:scale-110 transition-transform duration-150 block shrink-0" />
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>

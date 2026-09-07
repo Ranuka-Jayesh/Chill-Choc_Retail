@@ -13,6 +13,7 @@ import {
   PowerOff,
   LogOut,
   UserCheck,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface POSMoreMenuProps {
@@ -166,6 +167,17 @@ export const POSMoreMenu: React.FC<POSMoreMenuProps> = ({
       </div>
 
       <div className="pt-0.5 mt-0.5 border-t border-zinc-100">
+        <button
+          onClick={() => {
+            onClose();
+            navigate('/admin');
+          }}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-orange-50/70 text-zinc-800 hover:text-[#FF5500] transition-colors text-left font-semibold"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-[#FF5500]" />
+          <span>Admin Portal</span>
+        </button>
+
         <button
           onClick={() => {
             onClose();

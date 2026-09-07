@@ -71,7 +71,7 @@ export const POSLockScreen: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isLocked, unlockPOS]);
 
-  if (!isLocked) return null;
+  if (!isLocked || window.location.pathname.startsWith('/admin')) return null;
 
   return (
     <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-in fade-in duration-200">

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSales } from '@/stores/salesStore';
+import { useToast } from '@/stores/toastStore';
+import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
+import { MOCK_PRODUCTS } from '@/data/mockProducts';
 import { CashierHeader } from '@/components/pos/CashierHeader';
 import { ReceiptPreviewModal } from '@/components/modals/ReceiptPreviewModal';
-import { Modal } from '@/components/common/Modal';
 import { AppFooter } from '@/components/common/AppFooter';
 import { CustomDatePicker } from '@/components/common/CustomDatePicker';
 import { CompletedSale } from '@/types';
@@ -20,20 +22,103 @@ import {
 
 export const SalesHistoryScreen: React.FC = () => {
   const navigate = useNavigate();
-  const { sales } = useSales();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { sales, getSaleByInvoice } = useSales();
+  const { showToast } = useToast();
 
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'today' | 'yesterday' | 'month' | 'custom'>('all');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'Completed' | 'Returned'>('all');
 
-  const [selectedSaleForView, setSelectedSaleForView] = useState<CompletedSale | null>(null);
   const [selectedSaleForReceipt, setSelectedSaleForReceipt] = useState<CompletedSale | null>(null);
+
+  // Auto-open invoice when navigated with ?invoice=... (e.g. from POS barcode scan)
+  const invoiceParam = searchParams.get('invoice') || searchParams.get('search');
+  useEffect(() => {
+    if (invoiceParam) {
+      const cleanInv = invoiceParam.replace(/^\*+|\*+$/g, '').trim().toUpperCase();
+      setSearch(cleanInv);
+      setFilterMode('all');
+      setStatusFilter('all');
+
+      const matched =
+        getSaleByInvoice(cleanInv) ||
+        sales.find((s) => {
+          const num = s.invoiceNumber.toUpperCase();
+          return (
+            num === cleanInv ||
+            num === `INV-${cleanInv}` ||
+            num.replace(/[^0-9]/g, '') === cleanInv.replace(/[^0-9]/g, '') ||
+            s.id.toUpperCase() === cleanInv
+          );
+        });
+
+      if (matched) {
+        showToast(`Filtered to Invoice #${matched.invoiceNumber}`, 'info');
+      } else {
+        showToast(`Invoice #${cleanInv} not found`, 'warning');
+      }
+
+      // Clear the query parameter after consuming
+      setSearchParams({}, { replace: true });
+    }
+  }, [invoiceParam, sales, getSaleByInvoice, setSearchParams, showToast]);
+
+  // Global barcode scanning while on Sales History screen
+  useBarcodeScanner({
+    enabled: !selectedSaleForReceipt,
+    onScan: (scannedCode) => {
+      const clean = scannedCode.replace(/^\*+|\*+$/g, '').trim();
+      if (!clean) return;
+
+      // A. Check if it's an Invoice / Bill Barcode
+      const isInvoicePattern =
+        clean.toUpperCase().startsWith('INV-') ||
+        clean.toUpperCase().startsWith('CC-') ||
+        clean.toUpperCase().startsWith('SALE-');
+
+      const matchedSale =
+        getSaleByInvoice(clean) ||
+        sales.find((s) => s.invoiceNumber.toUpperCase() === clean.toUpperCase()) ||
+        sales.find((s) => s.id.toUpperCase() === clean.toUpperCase()) ||
+        (isInvoicePattern
+          ? sales.find((s) => s.invoiceNumber.replace(/[^0-9]/g, '') === clean.replace(/[^0-9]/g, ''))
+          : undefined);
+
+      if (matchedSale || isInvoicePattern) {
+        const invNum = matchedSale ? matchedSale.invoiceNumber : clean;
+        setSearch(invNum);
+        setFilterMode('all');
+        setStatusFilter('all');
+        if (matchedSale) {
+          showToast(`Filtered to Invoice #${matchedSale.invoiceNumber}`, 'info');
+        } else {
+          showToast(`Invoice #${clean} not found in history`, 'warning');
+        }
+        return;
+      }
+
+      // B. If a product barcode was scanned while on Sales History screen:
+      const matchedProduct =
+        MOCK_PRODUCTS.find((p) => p.barcode === clean) ||
+        MOCK_PRODUCTS.find((p) => p.sku.toLowerCase() === clean.toLowerCase()) ||
+        MOCK_PRODUCTS.find((p) => p.name.toLowerCase() === clean.toLowerCase());
+
+      if (matchedProduct) {
+        showToast(`Scanned ${matchedProduct.name}. Adding to bill...`, 'info');
+        navigate(`/cashier/pos?addBarcode=${encodeURIComponent(matchedProduct.barcode)}`);
+        return;
+      }
+
+      showToast(`Barcode not recognized: "${clean}"`, 'warning');
+    },
+  });
 
   // Shortcut: Pressing Backspace when no input field is active returns to POS terminal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (selectedSaleForView || selectedSaleForReceipt) return;
+      if (selectedSaleForReceipt) return;
 
       if (e.key === 'Backspace') {
         const activeEl = document.activeElement;
@@ -51,7 +136,7 @@ export const SalesHistoryScreen: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [navigate, selectedSaleForView, selectedSaleForReceipt]);
+  }, [navigate, selectedSaleForReceipt]);
 
   const handleSelectPeriod = (
     mode: 'all' | 'today' | 'yesterday' | 'month' | 'custom',
@@ -323,7 +408,7 @@ export const SalesHistoryScreen: React.FC = () => {
                         return (
                           <tr
                             key={sale.id}
-                            onClick={() => setSelectedSaleForView(sale)}
+                            onClick={() => setSelectedSaleForReceipt(sale)}
                             className="hover:bg-orange-50/35 transition-colors cursor-pointer group"
                           >
                             {/* Invoice Number */}
@@ -381,22 +466,22 @@ export const SalesHistoryScreen: React.FC = () => {
                             <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-center gap-1">
                                 <button
-                                  onClick={() => setSelectedSaleForView(sale)}
-                                  className="w-6 h-6 rounded-md text-zinc-400 hover:text-black hover:bg-zinc-100 transition-colors flex items-center justify-center"
-                                  title="View sale breakdown"
+                                  onClick={() => setSelectedSaleForReceipt(sale)}
+                                  className="w-6 h-6 rounded-md text-zinc-400 hover:text-black hover:bg-zinc-100 transition-colors flex items-center justify-center cursor-pointer"
+                                  title="View standard tax receipt"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   onClick={() => setSelectedSaleForReceipt(sale)}
-                                  className="w-6 h-6 rounded-md text-zinc-400 hover:text-[#FF5500] hover:bg-orange-50 transition-colors flex items-center justify-center"
-                                  title="Reprint 80mm thermal receipt"
+                                  className="w-6 h-6 rounded-md text-zinc-400 hover:text-[#FF5500] hover:bg-orange-50 transition-colors flex items-center justify-center cursor-pointer"
+                                  title="Reprint standard 80mm thermal receipt"
                                 >
                                   <Printer className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   onClick={() => navigate(`/cashier/returns?invoice=${sale.invoiceNumber}`)}
-                                  className="w-6 h-6 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition-colors flex items-center justify-center"
+                                  className="w-6 h-6 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition-colors flex items-center justify-center cursor-pointer"
                                   title="Request Return / Refund"
                                 >
                                   <RotateCcw className="w-3.5 h-3.5" />
@@ -509,120 +594,12 @@ export const SalesHistoryScreen: React.FC = () => {
         <AppFooter />
       </div>
 
-      {/* Sale Detail Modal */}
-      {selectedSaleForView && (
-        <Modal
-          isOpen={true}
-          onClose={() => setSelectedSaleForView(null)}
-          title={`Invoice ${selectedSaleForView.invoiceNumber}`}
-          subtitle={`${selectedSaleForView.date} • ${selectedSaleForView.timestamp}`}
-          maxWidth="sm"
-        >
-          <div className="space-y-2.5 select-none text-xs">
-            {/* Customer, Status & Cashier */}
-            <div className="flex items-center justify-between p-2 rounded-lg bg-zinc-50 border border-zinc-200 text-[11px]">
-              <div>
-                <span className="text-zinc-400 block text-[9px] uppercase font-bold">Customer</span>
-                <span className="font-bold text-black">
-                  {selectedSaleForView.customer?.name || 'Walk-in Customer'}
-                </span>
-              </div>
-              <div className="text-center">
-                <span className="text-zinc-400 block text-[9px] uppercase font-bold mb-0.5">Status</span>
-                {selectedSaleForView.status === 'Returned' || selectedSaleForView.status === 'Refunded' ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 text-[10px] font-bold border border-rose-200 shadow-2xs">
-                    <RotateCcw className="w-2.5 h-2.5" />
-                    <span>Returned</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200 shadow-2xs">
-                    <CheckCircle className="w-2.5 h-2.5" />
-                    <span>Completed</span>
-                  </span>
-                )}
-              </div>
-              <div className="text-right">
-                <span className="text-zinc-400 block text-[9px] uppercase font-bold">Cashier</span>
-                <span className="font-bold text-black">{selectedSaleForView.cashier}</span>
-              </div>
-            </div>
-
-            {/* Line items list */}
-            <div className="space-y-1">
-              <span className="font-bold text-black block text-[11px]">Purchased Products</span>
-              <div className="border border-zinc-200 rounded-lg divide-y divide-zinc-100 overflow-hidden max-h-[160px] overflow-y-auto">
-                {selectedSaleForView.items.map((item, idx) => (
-                  <div key={idx} className="p-2 flex items-center justify-between">
-                    <div>
-                      <h5 className="font-bold text-black text-xs">{item.product.name}</h5>
-                      <span className="text-[10px] text-zinc-400">
-                        {item.quantity} &times; Rs. {item.unitPrice.toLocaleString()} ({item.product.weight})
-                        {item.salesperson && ` • TM: ${item.salesperson.name.split(' ')[0]}`}
-                      </span>
-                    </div>
-                    <span className="font-mono font-bold text-black text-xs">
-                      Rs. {(item.unitPrice * item.quantity).toLocaleString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Totals & Tenders */}
-            <div className="p-2 rounded-lg bg-zinc-50 border border-zinc-200 space-y-1 text-[11px]">
-              <div className="flex justify-between text-zinc-500">
-                <span>Subtotal</span>
-                <span className="font-mono">Rs. {selectedSaleForView.subtotal.toLocaleString()}</span>
-              </div>
-              {selectedSaleForView.discountTotal > 0 && (
-                <div className="flex justify-between text-[#FF5500] font-bold">
-                  <span>Discount</span>
-                  <span className="font-mono">
-                    - Rs. {selectedSaleForView.discountTotal.toLocaleString()}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between font-black text-xs text-black pt-1 border-t border-zinc-200">
-                <span>Total Paid</span>
-                <span className="font-mono">Rs. {selectedSaleForView.total.toLocaleString()}</span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="pt-2 border-t border-zinc-100 flex items-center justify-between gap-2">
-              <button
-                onClick={() => {
-                  const inv = selectedSaleForView.invoiceNumber;
-                  setSelectedSaleForView(null);
-                  navigate(`/cashier/returns?invoice=${inv}`);
-                }}
-                className="py-1.5 px-2.5 rounded-lg border border-zinc-200 hover:bg-rose-50 text-rose-600 text-xs font-bold transition-colors flex items-center gap-1"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Return</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  const s = selectedSaleForView;
-                  setSelectedSaleForView(null);
-                  setSelectedSaleForReceipt(s);
-                }}
-                className="py-1.5 px-3 rounded-lg bg-[#FF5500] hover:bg-[#E04B00] text-white text-xs font-bold uppercase tracking-wider transition-all shadow-xs flex items-center gap-1"
-              >
-                <Printer className="w-3 h-3" />
-                <span>Print Slip</span>
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Receipt Modal */}
+      {/* Formal Standard 80mm Tax Receipt Modal */}
       <ReceiptPreviewModal
         isOpen={!!selectedSaleForReceipt}
         onClose={() => setSelectedSaleForReceipt(null)}
         sale={selectedSaleForReceipt}
+        onReturn={(inv) => navigate(`/cashier/returns?invoice=${inv}`)}
       />
     </div>
   );

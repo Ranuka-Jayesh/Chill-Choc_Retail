@@ -1,11 +1,15 @@
-import React, { useState, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MOCK_PRODUCTS } from '@/data/mockProducts';
-import { ConfectionCategory, CartItem as CartItemType, CompletedSale, Salesperson } from '@/types';
+import { ConfectionCategory, CartItem as CartItemType, CompletedSale, Salesperson, Product } from '@/types';
+import { useProducts } from '@/stores/productStore';
 import { useCart } from '@/stores/cartStore';
 import { useCashier } from '@/stores/cashierStore';
 import { useSales } from '@/stores/salesStore';
+import { useToast } from '@/stores/toastStore';
 import { usePosShortcuts } from '@/hooks/usePosShortcuts';
+import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
+import { productSyncSocket } from '@/services/productSyncSocket';
 
 import { CashierHeader } from '@/components/pos/CashierHeader';
 import { ProductListView } from '@/components/pos/ProductListView';
@@ -30,6 +34,7 @@ import { SalespersonReportModal } from '@/components/modals/SalespersonReportMod
 
 export const PosScreen: React.FC = () => {
   const navigate = useNavigate();
+  const { products } = useProducts();
   const { cashier, lockPOS } = useCashier();
   const {
     items,
@@ -59,7 +64,25 @@ export const PosScreen: React.FC = () => {
     setShowClearConfirm,
   } = useCart();
 
-  const { completeSale, lastCompletedSale } = useSales();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { showToast } = useToast();
+  const { completeSale, lastCompletedSale, sales, getSaleByInvoice } = useSales();
+
+  // If redirected from Sales History with a product barcode to add
+  const addBarcodeParam = searchParams.get('addBarcode');
+  useEffect(() => {
+    if (addBarcodeParam) {
+      const clean = addBarcodeParam.replace(/^\*+|\*+$/g, '').trim();
+      const matched =
+        products.find((p) => p.barcode === clean) ||
+        products.find((p) => p.sku.toLowerCase() === clean.toLowerCase());
+      if (matched) {
+        addItem(matched);
+        showToast(`Added ${matched.name} to bill`, 'success');
+      }
+      setSearchParams({}, { replace: true });
+    }
+  }, [addBarcodeParam, addItem, setSearchParams, showToast]);
 
   // Search & Filtering State
   const [searchQuery, setSearchQuery] = useState('');
@@ -91,9 +114,60 @@ export const PosScreen: React.FC = () => {
   // Completed sale tracking for success modal & receipt
   const [currentSuccessSale, setCurrentSuccessSale] = useState<CompletedSale | null>(null);
 
+  // Global Barcode Scanner Handler (works without focusing the search bar!)
+  useBarcodeScanner({
+    enabled:
+      !isPaymentModalOpen &&
+      !isSuccessOpen &&
+      !isReceiptOpen &&
+      !isHoldBillOpen &&
+      !isCashMovementOpen,
+    onScan: (scannedCode) => {
+      // 1. Clean any Code 39 start/stop asterisks and whitespace
+      const cleanCode = scannedCode.replace(/^\*+|\*+$/g, '').trim();
+      if (!cleanCode) return;
+
+      // 2. Check if this is an Invoice / Bill Barcode
+      const isInvoicePattern =
+        cleanCode.toUpperCase().startsWith('INV-') ||
+        cleanCode.toUpperCase().startsWith('CC-') ||
+        cleanCode.toUpperCase().startsWith('SALE-');
+
+      const matchingSale =
+        getSaleByInvoice(cleanCode) ||
+        sales.find((s) => s.invoiceNumber.toUpperCase() === cleanCode.toUpperCase()) ||
+        sales.find((s) => s.id.toUpperCase() === cleanCode.toUpperCase()) ||
+        (isInvoicePattern
+          ? sales.find((s) => s.invoiceNumber.replace(/[^0-9]/g, '') === cleanCode.replace(/[^0-9]/g, ''))
+          : undefined);
+
+      if (isInvoicePattern || matchingSale) {
+        const invNum = matchingSale ? matchingSale.invoiceNumber : cleanCode;
+        showToast(`Scanned Bill #${invNum}. Opening Sales History...`, 'info');
+        navigate(`/cashier/sales-history?invoice=${encodeURIComponent(invNum)}`);
+        return;
+      }
+
+      // 3. Check if this is a Product Barcode
+      const matchedProduct =
+        products.find((p) => p.barcode === cleanCode) ||
+        products.find((p) => p.sku.toLowerCase() === cleanCode.toLowerCase()) ||
+        products.find((p) => p.name.toLowerCase() === cleanCode.toLowerCase());
+
+      if (matchedProduct) {
+        addItem(matchedProduct);
+        showToast(`Added ${matchedProduct.name} (Rs. ${matchedProduct.price.toLocaleString()})`, 'success');
+        return;
+      }
+
+      // 4. Unrecognized barcode
+      showToast(`Barcode not recognized: "${cleanCode}"`, 'warning');
+    },
+  });
+
   // Filtered products calculation
   const filteredProducts = useMemo(() => {
-    return MOCK_PRODUCTS.filter((product) => {
+    return products.filter((product) => {
       const categoryMatches =
         selectedCategory === 'all' || product.category === selectedCategory;
 
@@ -108,12 +182,12 @@ export const PosScreen: React.FC = () => {
         (product.brand && product.brand.toLowerCase().includes(query))
       );
     });
-  }, [selectedCategory, searchQuery]);
+  }, [products, selectedCategory, searchQuery]);
 
   // Category counts
   const categoryCounts = useMemo(() => {
     const counts: Record<ConfectionCategory, number> = {
-      all: MOCK_PRODUCTS.length,
+      all: products.length,
       chocolate: 0,
       toffees: 0,
       biscuits: 0,
@@ -121,13 +195,42 @@ export const PosScreen: React.FC = () => {
       gifts: 0,
       others: 0,
     };
-    MOCK_PRODUCTS.forEach((p) => {
+    products.forEach((p) => {
       if (counts[p.category] !== undefined) {
         counts[p.category]++;
       }
     });
     return counts;
-  }, []);
+  }, [products]);
+
+  // Real-time toast notifications when products are added, updated, or marked unavailable/available
+  useEffect(() => {
+    const unsub = productSyncSocket.subscribe((event) => {
+      if (event.type === 'PRODUCT_AVAILABILITY_CHANGED') {
+        const prod = products.find((p) => p.id === event.payload.id);
+        const name = prod?.name || 'Product';
+        showToast(
+          `${name} marked as ${event.payload.isAvailable ? 'Available' : 'Unavailable'}`,
+          event.payload.isAvailable ? 'success' : 'info'
+        );
+      } else if (event.type === 'PRODUCT_ADDED') {
+        showToast(`New product added: "${event.payload.name}"`, 'success');
+      } else if (event.type === 'PRODUCT_DELETED') {
+        showToast('A product was removed from catalog', 'info');
+      } else if (event.type === 'PRODUCT_UPDATED') {
+        if (event.payload.updates.isAvailable !== undefined) {
+          const prod = products.find((p) => p.id === event.payload.id);
+          const name = prod?.name || 'Product';
+          showToast(
+            `${name} marked as ${event.payload.updates.isAvailable ? 'Available' : 'Unavailable'}`,
+            event.payload.updates.isAvailable ? 'success' : 'info'
+          );
+        }
+      }
+    });
+
+    return () => unsub();
+  }, [products, showToast]);
 
   // Keyboard shortcut handlers
   usePosShortcuts({
@@ -441,7 +544,7 @@ export const PosScreen: React.FC = () => {
         >
           <ProductListView
             products={filteredProducts}
-            allProducts={MOCK_PRODUCTS}
+            allProducts={products}
             selectedCategory={selectedCategory}
             onSelectCategory={setSelectedCategory}
             categoryCounts={categoryCounts}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Product } from '@/types';
-import { Package, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 interface ProductCardProps {
   product: Product;
@@ -8,18 +8,19 @@ interface ProductCardProps {
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
-  const isOutOfStock = product.stock <= 0;
-  const isLowStock = !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
+  const isUnavailable = product.isAvailable === false;
+  const isOutOfStock = !isUnavailable && product.stock <= 0;
+  const isLowStock = !isUnavailable && !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
 
   return (
     <div
       onClick={() => {
-        if (!isOutOfStock) {
+        if (!isOutOfStock && !isUnavailable) {
           onAddToCart(product);
         }
       }}
       className={`group relative bg-white rounded-xl border border-zinc-200 p-2.5 flex flex-col justify-between transition-all duration-150 select-none shadow-xs ${
-        isOutOfStock
+        isUnavailable || isOutOfStock
           ? 'opacity-60 cursor-not-allowed bg-zinc-50 border-dashed'
           : 'cursor-pointer hover:border-[#FF5500] hover:shadow-sm hover:-translate-y-0.5 active:scale-[0.98]'
       }`}
@@ -48,14 +49,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }
           </span>
         </div>
 
-        {/* Subtle Stock Badges */}
-        {isOutOfStock && (
+        {/* Subtle Stock & Availability Badges */}
+        {isUnavailable ? (
+          <div className="absolute inset-0 bg-black/65 backdrop-blur-[1px] flex items-center justify-center">
+            <span className="px-2 py-0.5 rounded-md bg-zinc-800 border border-zinc-600 text-zinc-200 text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              Unavailable
+            </span>
+          </div>
+        ) : isOutOfStock ? (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px] flex items-center justify-center">
             <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               Out of Stock
             </span>
           </div>
-        )}
+        ) : null}
 
         {isLowStock && (
           <div className="absolute bottom-1.5 right-1.5">
@@ -66,7 +73,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }
         )}
 
         {/* Quick Add overlay button */}
-        {!isOutOfStock && (
+        {!isOutOfStock && !isUnavailable && (
           <div className="absolute bottom-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <div className="w-6 h-6 rounded-lg bg-[#FF5500] text-white flex items-center justify-center shadow-xs">
               <Plus className="w-3.5 h-3.5" />

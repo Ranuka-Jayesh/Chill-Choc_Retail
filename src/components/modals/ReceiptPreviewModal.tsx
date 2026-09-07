@@ -1,12 +1,17 @@
-import React from 'react';
-import { Modal } from '@/components/common/Modal';
+import React, { useState } from 'react';
 import { CompletedSale } from '@/types';
-import { Printer, X } from 'lucide-react';
+import { usePrinter } from '@/hooks/usePrinter';
+import { useToast } from '@/stores/toastStore';
+import { generateReceiptPdf, downloadReceiptPdf } from '@/services/receiptPdfGenerator';
+import { ThermalReceiptContent } from '@/components/pos/ThermalReceiptContent';
+import { PrintableReceiptPortal } from '@/components/pos/PrintableReceiptPortal';
+import { Printer, Download } from 'lucide-react';
 
 interface ReceiptPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   sale: CompletedSale | null;
+  onReturn?: (invoiceNumber: string) => void;
 }
 
 export const ReceiptPreviewModal: React.FC<ReceiptPreviewModalProps> = ({
@@ -14,161 +19,100 @@ export const ReceiptPreviewModal: React.FC<ReceiptPreviewModalProps> = ({
   onClose,
   sale,
 }) => {
-  if (!sale) return null;
+  const { isConnected, printReceipt, isPrinting } = usePrinter();
+  const { showToast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handlePrint = () => {
-    window.print();
+  if (!isOpen || !sale) return null;
+
+  const handleDownloadPdf = async () => {
+    try {
+      setIsSubmitting(true);
+      await downloadReceiptPdf(sale, { paperWidthMm: 80 });
+      showToast(`Downloaded ${sale.invoiceNumber || 'receipt'}.pdf`, 'success');
+    } catch (err: any) {
+      console.error('Failed to download PDF:', err);
+      showToast('Failed to download PDF', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePrint = async () => {
+    try {
+      setIsSubmitting(true);
+      const pdfBase64 = await generateReceiptPdf(sale, { paperWidthMm: 80 });
+
+      if (isConnected) {
+        await printReceipt({
+          format: 'pdf',
+          data: pdfBase64,
+          jobId: 'receipt-' + (sale.invoiceNumber || sale.id),
+        });
+        showToast(`Receipt sent to printer (${sale.invoiceNumber})`, 'success');
+      } else {
+        showToast('POS Print Agent offline. Opening browser print dialog...', 'info');
+        window.print();
+      }
+    } catch (err: any) {
+      console.error('Failed to print receipt:', err);
+      showToast(`Print failed: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      onConfirm={handlePrint}
-      title="Thermal Receipt Preview"
-      subtitle="80mm Thermal Receipt Simulation"
-      maxWidth="xs"
-    >
-      <div className="space-y-2.5 select-none">
-        {/* Thermal Receipt Body */}
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 select-none"
+        onClick={onClose}
+        role="dialog"
+        aria-modal="true"
+      >
         <div
-          id="thermal-receipt"
-          className="bg-white p-3 rounded-lg border border-zinc-300 text-black font-mono text-[11px] shadow-2xs space-y-2 leading-relaxed max-h-[50vh] overflow-y-auto"
+          className="flex flex-col items-center max-w-[360px] w-full max-h-[92vh] animate-in zoom-in-95 duration-150"
+          onClick={(e) => e.stopPropagation()}
         >
-          {/* Receipt Header */}
-          <div className="text-center pb-1.5 border-b border-dashed border-zinc-300">
-            <img
-              src="/logo.png"
-              alt="Chill & Choc"
-              className="h-9 w-auto mx-auto object-contain mb-1"
-            />
-            <h2 className="text-xs font-black tracking-tight text-black">
-              CHILL & CHOC
-            </h2>
-            <p className="text-[9px] font-bold text-[#FF5500] tracking-wider uppercase">
-              COOL VIBES, SWEET BITES
-            </p>
-            <p className="text-[9px] text-zinc-400 mt-0.5">
-              Colombo Flagship Branch &bull; +94 11 234 5678
-            </p>
+          {/* White Thermal Bill Card */}
+          <div className="w-full bg-white rounded-3xl shadow-2xl overflow-y-auto max-h-[76vh] border border-zinc-200/90">
+            <ThermalReceiptContent sale={sale} isPrintMode={false} />
           </div>
 
-          {/* Meta Info */}
-          <div className="text-[10px] space-y-0.5 pb-1.5 border-b border-dashed border-zinc-300">
-            <div className="flex justify-between">
-              <span>Invoice:</span>
-              <span className="font-bold">{sale.invoiceNumber}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Date/Time:</span>
-              <span>{sale.date} • {sale.timestamp}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Cashier:</span>
-              <span>{sale.cashier}</span>
-            </div>
-            {sale.customer && (
-              <div className="flex justify-between">
-                <span>Customer:</span>
-                <span>{sale.customer.name}</span>
-              </div>
-            )}
+          {/* Action Buttons Below Receipt */}
+          <div className="flex items-center justify-center gap-2.5 mt-4 shrink-0 flex-wrap">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-2.5 rounded-full bg-[#2A2A2A] hover:bg-[#383838] active:scale-95 text-white font-bold text-xs tracking-wide transition-all shadow-md cursor-pointer"
+            >
+              Done
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              className="px-5 py-2.5 rounded-full bg-white hover:bg-zinc-100 active:scale-95 text-zinc-900 font-bold text-xs tracking-wide transition-all shadow-md border border-zinc-300 flex items-center gap-1.5 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-zinc-700" />
+              <span>Download PDF</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isSubmitting || isPrinting}
+              className="px-6 py-2.5 rounded-full bg-[#14B8A6] hover:bg-[#0D9488] active:scale-95 disabled:opacity-60 text-white font-bold text-xs tracking-wide transition-all shadow-lg shadow-teal-500/25 flex items-center gap-1.5 cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              <span>{isSubmitting || isPrinting ? 'Printing...' : 'Print Receipt'}</span>
+            </button>
           </div>
-
-          {/* Line Items */}
-          <div className="space-y-1 py-1 border-b border-dashed border-zinc-300">
-            {sale.items.map((item, idx) => (
-              <div key={idx} className="space-y-0.5">
-                <div className="flex justify-between font-bold text-[11px]">
-                  <span className="truncate pr-1">{item.product.name}</span>
-                  <span className="tabular-numbers">
-                    {(item.unitPrice * item.quantity).toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between text-[9px] text-zinc-400">
-                  <span>
-                    {item.quantity} &times; Rs. {item.unitPrice.toLocaleString()} ({item.product.weight})
-                  </span>
-                  {item.salesperson && (
-                    <span>TM: {item.salesperson.name.split(' ')[0]}</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Totals Breakdown */}
-          <div className="space-y-0.5 text-[11px] py-1 border-b border-dashed border-zinc-300">
-            <div className="flex justify-between">
-              <span>Subtotal:</span>
-              <span className="tabular-numbers">Rs. {sale.subtotal.toLocaleString()}</span>
-            </div>
-            {sale.discountTotal > 0 && (
-              <div className="flex justify-between text-[#FF5500]">
-                <span>Discount:</span>
-                <span className="tabular-numbers">- Rs. {sale.discountTotal.toLocaleString()}</span>
-              </div>
-            )}
-            <div className="flex justify-between font-black text-xs pt-1 text-black">
-              <span>TOTAL:</span>
-              <span className="tabular-numbers">Rs. {sale.total.toLocaleString()}</span>
-            </div>
-          </div>
-
-          {/* Payment Tenders & Change */}
-          <div className="space-y-0.5 text-[10px] py-1 border-b border-dashed border-zinc-300">
-            {sale.tenders.map((t, idx) => (
-              <div key={idx} className="flex justify-between">
-                <span className="capitalize">{t.method}:</span>
-                <span className="tabular-numbers">Rs. {t.amount.toLocaleString()}</span>
-              </div>
-            ))}
-            {sale.change > 0 && (
-              <div className="flex justify-between font-bold text-emerald-700">
-                <span>Change Given:</span>
-                <span className="tabular-numbers">Rs. {sale.change.toLocaleString()}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="text-center pt-1 space-y-1">
-            <p className="text-[10px] font-bold text-black">
-              Thank you for visiting!
-            </p>
-            <p className="text-[8px] text-zinc-400 uppercase tracking-wider">
-              Cool Vibes, Sweet Bites &bull; Keep for Returns
-            </p>
-
-            <div className="py-1 flex flex-col items-center">
-              <div className="h-6 w-36 bg-gradient-to-r from-black via-transparent to-black flex items-center justify-center tracking-widest text-[7px] font-bold">
-                ||||| | |||| ||| || |||||| | |||
-              </div>
-              <span className="text-[8px] text-zinc-400 tracking-widest mt-0.5">
-                *{sale.invoiceNumber}*
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Buttons */}
-        <div className="flex items-center gap-2 pt-1 border-t border-zinc-100">
-          <button
-            onClick={onClose}
-            className="flex-1 py-1.5 px-3 rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-100 transition-colors flex items-center justify-center gap-1"
-          >
-            <X className="w-3 h-3" />
-            <span>Close</span>
-          </button>
-          <button
-            onClick={handlePrint}
-            className="flex-1 py-1.5 px-3 rounded-lg bg-[#FF5500] text-white text-xs font-bold uppercase tracking-wider hover:bg-[#E04B00] transition-colors flex items-center justify-center gap-1 shadow-xs"
-          >
-            <Printer className="w-3 h-3" />
-            <span>Print</span>
-          </button>
         </div>
       </div>
-    </Modal>
+
+      {/* Unconstrained Standard 80mm Browser Print Portal */}
+      <PrintableReceiptPortal sale={sale} paperWidth={80} />
+    </>
   );
 };

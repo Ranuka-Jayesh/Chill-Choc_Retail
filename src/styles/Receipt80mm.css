@@ -1,0 +1,85 @@
+/* ==========================================================================
+   Receipt80mm.css - Forcefully locks printable width to 80mm, height: auto
+   Tailored for continuous roll thermal printing on 80mm receipt printers
+   ========================================================================== */
+
+@page {
+  /* Exactly 80mm width, height set to auto/infinite roll with zero browser margins */
+  size: 80mm auto;
+  margin: 0mm !important;
+}
+
+@media print {
+  /* Forcefully lock the printable body width to exactly 80mm & height to auto */
+  html,
+  body {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    min-width: 80mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Completely hide main application UI during browser printing */
+  #root {
+    display: none !important;
+  }
+
+  /* Unconstrained 80mm dedicated print portal */
+  #print-mount {
+    display: block !important;
+    position: static !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    min-width: 80mm !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 1.5mm 4mm 1.5mm !important;
+    box-sizing: border-box !important;
+    background-color: #ffffff !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  #print-mount * {
+    visibility: visible !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Ensure continuous roll flow without arbitrary page splits */
+  .thermal-receipt-root,
+  .receipt-table,
+  .receipt-item-row,
+  .receipt-header,
+  .receipt-footer,
+  [data-receipt-footer="true"],
+  [data-thermal-receipt="true"] {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
+
+/* Shared classes for 80mm thermal receipt */
+.receipt-80mm-container {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.receipt-item-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  box-sizing: border-box;
+  max-width: 100%;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}

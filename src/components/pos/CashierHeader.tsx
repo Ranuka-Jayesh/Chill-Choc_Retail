@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCashier } from '@/stores/cashierStore';
+import { usePrinter } from '@/hooks/usePrinter';
+import { POSMoreMenu } from './POSMoreMenu';
 import {
   Store,
   User,
@@ -12,6 +14,8 @@ import {
   Minimize,
   Lock,
   LogOut,
+  Printer,
+  MoreVertical,
 } from 'lucide-react';
 
 interface CashierHeaderProps {
@@ -30,9 +34,12 @@ export const CashierHeader: React.FC<CashierHeaderProps> = ({
   onOpenHeldBills,
 }) => {
   const { cashier, session, lockPOS, logout } = useCashier();
+  const { isConnected, reconnect } = usePrinter();
   const navigate = useNavigate();
   const [showLockConfirm, setShowLockConfirm] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState(false);
@@ -221,7 +228,7 @@ export const CashierHeader: React.FC<CashierHeaderProps> = ({
           </div>
         </div>
 
-        {/* Connectivity & Sync Status: Wifi, Database, Sync */}
+        {/* Connectivity & Device Status: Wifi, Database, Sync, Printer */}
         <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200/80">
           <div title="Wi-Fi: Connected (Online)" className="flex items-center justify-center text-emerald-600">
             <Wifi className="w-3.5 h-3.5" />
@@ -236,6 +243,34 @@ export const CashierHeader: React.FC<CashierHeaderProps> = ({
             className="flex items-center justify-center text-emerald-600 hover:text-black transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#FF5500]' : ''}`} />
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              if (isConnected || isReconnecting) return;
+              setIsReconnecting(true);
+              try {
+                await reconnect();
+              } catch {
+                // Handled in store
+              } finally {
+                setIsReconnecting(false);
+              }
+            }}
+            title={
+              isConnected
+                ? "Printer Ready (ws://127.0.0.1:17891)"
+                : isReconnecting
+                ? "Connecting to Printer..."
+                : "Printer Offline (ws://127.0.0.1:17891) - Click to reconnect"
+            }
+            className={`flex items-center justify-center transition-colors ${
+              isConnected
+                ? 'text-emerald-600 cursor-default'
+                : 'text-amber-600 hover:text-amber-700 cursor-pointer'
+            }`}
+          >
+            <Printer className={`w-3.5 h-3.5 ${isReconnecting ? 'animate-spin' : ''}`} />
           </button>
         </div>
 
@@ -279,7 +314,33 @@ export const CashierHeader: React.FC<CashierHeaderProps> = ({
         >
           <LogOut className="w-4 h-4" />
         </button>
+
+        {/* More Operations Menu Button */}
+        <button
+          type="button"
+          onClick={() => setIsMoreMenuOpen((prev) => !prev)}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
+            isMoreMenuOpen
+              ? 'bg-zinc-200 text-black'
+              : 'text-zinc-700 hover:text-black hover:bg-zinc-100'
+          }`}
+          title="More Operations"
+          aria-label="More Operations"
+        >
+          <MoreVertical className="w-4 h-4" />
+        </button>
       </div>
+
+      {/* POS More Operations Menu Popup */}
+      <POSMoreMenu
+        isOpen={isMoreMenuOpen}
+        onClose={() => setIsMoreMenuOpen(false)}
+        onOpenCashMovement={onOpenCashMovement}
+        onOpenShortcutsHelp={onOpenShortcutsHelp}
+        onReprintReceipt={onReprintReceipt}
+        onOpenRepReport={onOpenRepReport}
+        onOpenHeldBills={onOpenHeldBills}
+      />
 
       {/* ========================================================= */}
       {/* CONFIRM LOCK POPUP WITH WARNING MASCOT                    */}

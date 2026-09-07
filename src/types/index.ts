@@ -5,13 +5,41 @@ export type ConfectionCategory =
   | 'biscuits' 
   | 'drinks' 
   | 'gifts' 
-  | 'others';
+  | 'others'
+  | (string & {});
+
+export interface Supplier {
+  id: string;
+  name: string;
+  code: string;
+  contactPerson: string;
+  phone: string;
+  email?: string;
+  leadTimeDays?: number;
+  rating?: number;
+  status: 'Active' | 'Inactive';
+}
+
+export interface ProductBatch {
+  id: string;
+  productId: string;
+  supplierId: string;
+  supplierName: string;
+  batchNumber: string;
+  costPrice: number;
+  sellingPrice: number;
+  receivedDate: string;
+  expiryDate?: string;
+  quantityReceived: number;
+  quantityRemaining: number;
+}
 
 export interface Product {
   id: string;
   name: string;
   weight: string;
   price: number;
+  costPrice?: number;
   category: ConfectionCategory;
   barcode: string;
   sku: string;
@@ -21,6 +49,9 @@ export interface Product {
   imageUrl?: string;
   brand?: string;
   description?: string;
+  batches?: ProductBatch[];
+  isAvailable?: boolean;
+  expiryDate?: string;
 }
 
 export interface Salesperson {
@@ -107,6 +138,9 @@ export interface ReturnItem {
   reason: string;
   returnToStock: boolean;
   refundAmount: number;
+  supplierId?: string;
+  supplierName?: string;
+  batchNumber?: string;
 }
 
 export interface ReturnRequest {
@@ -118,6 +152,36 @@ export interface ReturnRequest {
   totalRefund: number;
   status: 'Pending Admin Approval' | 'Approved' | 'Rejected';
   submittedBy: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNotes?: string;
+  supplierReturnId?: string;
+}
+
+export interface SupplierReturn {
+  id: string;
+  returnCode: string; // e.g. "RTV-0042"
+  supplierId: string;
+  supplierName: string;
+  customerInvoiceNumber: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitCost: number;
+  totalDebitAmount: number;
+  batchNumber: string;
+  reason: 'Damaged' | 'Expired' | 'Quality Issue' | 'Customer Changed Mind' | 'Wrong Product' | 'Packaging Defect' | 'Other';
+  claimStatus: 'Pending Dispatch' | 'Dispatched to Supplier' | 'Credit Note Received' | 'Replacement Received' | 'Rejected by Supplier';
+  timestamp: string;
+  notes?: string;
+}
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'Super Admin' | 'Store Manager' | 'Inventory Admin';
+  avatarInitials: string;
 }
 
 export interface CashMovement {
@@ -148,3 +212,46 @@ export interface CashSession {
   differenceReason?: string;
   isClosed: boolean;
 }
+
+export type POPaymentStatus = 'PAID' | 'CHEQUE PENDING' | 'CREDIT' | 'PARTIAL';
+
+export interface PurchaseOrderItem {
+  id: string;
+  productId: string;
+  productName: string;
+  weight?: string;
+  batchNumber: string;
+  expiryDate?: string;
+  quantity: number;
+  costPrice: number;
+  sellingPrice: number;
+  subtotal: number;
+}
+
+export interface POPaymentBreakdown {
+  cash: number;
+  card: number;
+  cheque: number;
+  chequeDueDate?: string;
+  chequeNumber?: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  poNumber: string;           // e.g. "PO-8803"
+  invoiceRef: string;         // e.g. "CBS-4412"
+  supplierId: string;
+  supplierName: string;
+  date: string;               // e.g. "Aug 27, 2026"
+  time: string;               // e.g. "04:30 PM"
+  isRolledOver?: boolean;
+  items: PurchaseOrderItem[];
+  totalInvoiced: number;
+  totalPaid: number;
+  balanceDue: number;
+  paymentStatus: POPaymentStatus;
+  paymentBreakdown: POPaymentBreakdown;
+  notes?: string;
+  verifiedBy: string;         // e.g. "Store Manager"
+}
+

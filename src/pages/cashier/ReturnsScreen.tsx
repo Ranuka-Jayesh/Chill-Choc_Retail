@@ -6,6 +6,7 @@ import { useCashier } from '@/stores/cashierStore';
 import { useToast } from '@/stores/toastStore';
 import { CashierHeader } from '@/components/pos/CashierHeader';
 import { AppFooter } from '@/components/common/AppFooter';
+import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
 import { CompletedSale, ReturnItem } from '@/types';
 import {
   ArrowLeft,
@@ -87,6 +88,16 @@ export const ReturnsScreen: React.FC = () => {
       showToast(`Invoice "${queryStr}" not found. Try INV-001829`, 'error');
     }
   };
+
+  // Global barcode scanning on Returns Screen
+  useBarcodeScanner({
+    onScan: (scannedCode) => {
+      const clean = scannedCode.replace(/^\*+|\*+$/g, '').trim();
+      if (!clean) return;
+      setInvoiceQuery(clean);
+      handleSearchInvoice(clean);
+    },
+  });
 
   const toggleSelectProduct = (itemId: string) => {
     setReturnConfig((prev) => ({

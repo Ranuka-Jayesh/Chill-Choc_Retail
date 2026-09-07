@@ -58,22 +58,46 @@
   }
 }
 
-/* Printable 80mm thermal receipt styles */
+/* Printable 80mm/58mm thermal receipt styles */
+@page {
+  size: 80mm auto;
+  margin: 0mm;
+}
+
 @media print {
-  body * {
-    visibility: hidden;
+  html, body {
+    width: 80mm !important;
+    min-height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    overflow: visible !important;
   }
-  #thermal-receipt, #thermal-receipt * {
-    visibility: visible;
+
+  /* Completely hide the main interactive application UI during print */
+  #root {
+    display: none !important;
   }
-  #thermal-receipt {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 80mm;
-    margin: 0;
-    padding: 10px;
-    box-shadow: none;
-    border: none;
+
+  /* Reveal our dedicated, unconstrained print portal mounted directly to document.body */
+  #print-mount {
+    display: block !important;
+    position: static !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 0 3mm !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  #print-mount * {
+    visibility: visible !important;
   }
 }
+

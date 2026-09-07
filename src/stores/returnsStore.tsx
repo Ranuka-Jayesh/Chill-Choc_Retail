@@ -9,6 +9,9 @@ interface ReturnsContextType {
     totalRefund: number;
     submittedBy: string;
   }) => ReturnRequest;
+  approveReturn: (id: string, notes?: string, reviewerName?: string) => void;
+  rejectReturn: (id: string, notes?: string, reviewerName?: string) => void;
+  linkSupplierReturn: (returnRequestId: string, supplierReturnId: string) => void;
 }
 
 const INITIAL_RETURNS: ReturnRequest[] = [
@@ -23,15 +26,45 @@ const INITIAL_RETURNS: ReturnRequest[] = [
         productName: 'Mars Bar 51g',
         quantity: 1,
         unitPrice: 480,
-        reason: 'Customer Changed Mind',
-        returnToStock: true,
+        reason: 'Damaged',
+        returnToStock: false,
         refundAmount: 480,
-      }
+        supplierId: 'sup-mars',
+        supplierName: 'Mars Global Foods Importers',
+        batchNumber: 'LOT-MARS-081',
+      },
     ],
     totalRefund: 480,
     status: 'Pending Admin Approval',
     submittedBy: 'Nimal Perera',
-  }
+  },
+  {
+    id: 'ret-000390',
+    returnCode: 'RET-000390',
+    invoiceNumber: 'INV-001820',
+    timestamp: 'Yesterday, 03:15 PM',
+    items: [
+      {
+        productId: 'prod-kitkat',
+        productName: 'KitKat Chunky 40g',
+        quantity: 2,
+        unitPrice: 450,
+        reason: 'Quality Issue',
+        returnToStock: false,
+        refundAmount: 900,
+        supplierId: 'sup-nestle',
+        supplierName: 'Nestlé Lanka PLC',
+        batchNumber: 'LOT-NES-401',
+      },
+    ],
+    totalRefund: 900,
+    status: 'Approved',
+    submittedBy: 'Nimal Perera',
+    reviewedAt: 'Yesterday, 03:30 PM',
+    reviewedBy: 'Chaminda Silva (Admin)',
+    reviewNotes: 'Customer refund paid out. Dispatched to Nestlé for warranty credit.',
+    supplierReturnId: 'rtv-100',
+  },
 ];
 
 const ReturnsContext = createContext<ReturnsContextType | undefined>(undefined);
@@ -50,7 +83,8 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     totalRefund: number;
     submittedBy: string;
   }) => {
-    const nextCode = `RET-000392`;
+    const nextNum = 392 + returnRequests.length;
+    const nextCode = `RET-${String(nextNum).padStart(6, '0')}`;
     const newRequest: ReturnRequest = {
       id: `ret-${Date.now()}`,
       returnCode: nextCode,
@@ -66,8 +100,56 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return newRequest;
   };
 
+  const approveReturn = (id: string, notes = '', reviewerName = 'Chaminda Silva (Admin)') => {
+    setReturnRequests((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status: 'Approved' as const,
+              reviewedAt: 'Just now',
+              reviewedBy: reviewerName,
+              reviewNotes: notes || 'Approved by store admin',
+            }
+          : r
+      )
+    );
+  };
+
+  const rejectReturn = (id: string, notes = '', reviewerName = 'Chaminda Silva (Admin)') => {
+    setReturnRequests((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status: 'Rejected' as const,
+              reviewedAt: 'Just now',
+              reviewedBy: reviewerName,
+              reviewNotes: notes || 'Rejected by store admin',
+            }
+          : r
+      )
+    );
+  };
+
+  const linkSupplierReturn = (returnRequestId: string, supplierReturnId: string) => {
+    setReturnRequests((prev) =>
+      prev.map((r) =>
+        r.id === returnRequestId ? { ...r, supplierReturnId } : r
+      )
+    );
+  };
+
   return (
-    <ReturnsContext.Provider value={{ returnRequests, submitReturnRequest }}>
+    <ReturnsContext.Provider
+      value={{
+        returnRequests,
+        submitReturnRequest,
+        approveReturn,
+        rejectReturn,
+        linkSupplierReturn,
+      }}
+    >
       {children}
     </ReturnsContext.Provider>
   );

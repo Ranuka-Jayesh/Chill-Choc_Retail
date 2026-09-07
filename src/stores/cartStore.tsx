@@ -73,6 +73,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { showToast } = useToast();
 
   const addItem = useCallback((product: Product, quantity = 1, salesperson: Salesperson | null = null) => {
+    if (product.isAvailable === false) {
+      showToast(`${product.name} is currently Unavailable`, 'warning');
+      return;
+    }
+
     if (product.stock <= 0) {
       showToast(`${product.name} is Out of Stock`, 'error');
       return;
