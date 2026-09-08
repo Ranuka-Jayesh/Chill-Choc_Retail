@@ -10,27 +10,12 @@ interface TopItemStat {
   unitsSold: number;
 }
 
-const BASE_TOP_VELOCITY: Record<string, number> = {
-  'prod-kitkat': 48,
-  'prod-snickers': 39,
-  'prod-toblerone': 32,
-  'prod-ferrero': 27,
-  'prod-kinder': 23,
-  'prod-mars': 19,
-  'prod-cadbury': 16,
-  'prod-mnm': 14,
-  'prod-twix': 11,
-  'prod-bounty': 9,
-  'prod-hershey': 8,
-  'prod-oreo': 6,
-};
-
 export const TopSellingItemsCard: React.FC = () => {
   const navigate = useNavigate();
   const { sales } = useSales();
   const { products } = useProducts();
 
-  // Compute top 6 selling products
+  // Compute top 6 selling products from real sales data only
   const top6Items: TopItemStat[] = React.useMemo(() => {
     const itemMap = new Map<string, number>();
 
@@ -41,11 +26,12 @@ export const TopSellingItemsCard: React.FC = () => {
       });
     });
 
-    const candidateProducts = products.length > 0 ? products : [];
-    const stats: { product: Product; unitsSold: number }[] = candidateProducts.map((p) => {
-      const liveSold = itemMap.get(p.id) || 0;
-      const baseSold = BASE_TOP_VELOCITY[p.id] || 5;
-      return { product: p, unitsSold: baseSold + liveSold };
+    const stats: TopItemStat[] = [];
+    itemMap.forEach((unitsSold, prodId) => {
+      const p = products.find((prod) => prod.id === prodId);
+      if (p && unitsSold > 0) {
+        stats.push({ product: p, unitsSold });
+      }
     });
 
     stats.sort((a, b) => b.unitsSold - a.unitsSold);
@@ -63,7 +49,7 @@ export const TopSellingItemsCard: React.FC = () => {
 
   return (
     <div className="bg-white rounded-2xl border border-zinc-200/90 shadow-xs p-3.5 space-y-2.5">
-      {/* Minimal Header */}
+      {/* Header */}
       <div className="flex items-center justify-between pb-1.5 border-b border-zinc-100">
         <div className="flex items-center gap-1.5">
           <div className="p-1 rounded-md bg-orange-50 text-[#FF5500]">
@@ -84,77 +70,83 @@ export const TopSellingItemsCard: React.FC = () => {
         </button>
       </div>
 
-      {/* Horizontal 6 Items Grid (Compact, Non-popup) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-        {top6Items.map((item, idx) => {
-          const rankStyle = rankBadges[idx] || rankBadges[3];
+      {/* Grid or Empty State */}
+      {top6Items.length === 0 ? (
+        <div className="py-6 text-center text-xs text-zinc-400 font-medium">
+          No sales recorded yet. Completed checkout sales will rank here in real-time.
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          {top6Items.map((item, idx) => {
+            const rankStyle = rankBadges[idx] || rankBadges[3];
 
-          return (
-            <div
-              key={item.product.id}
-              className="group relative bg-white rounded-xl border border-zinc-200 p-2 flex flex-col justify-between select-none shadow-xs"
-            >
-              {/* Product Image */}
-              <div className="relative w-full h-18 sm:h-20 rounded-lg bg-zinc-100 flex items-center justify-center overflow-hidden border border-zinc-200 mb-1.5">
-                {item.product.imageUrl && (
-                  <img
-                    src={item.product.imageUrl}
-                    alt={item.product.name}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                )}
+            return (
+              <div
+                key={item.product.id}
+                className="group relative bg-white rounded-xl border border-zinc-200 p-2 flex flex-col justify-between select-none shadow-xs"
+              >
+                {/* Product Image */}
+                <div className="relative w-full h-18 sm:h-20 rounded-lg bg-zinc-100 flex items-center justify-center overflow-hidden border border-zinc-200 mb-1.5">
+                  {item.product.imageUrl && (
+                    <img
+                      src={item.product.imageUrl}
+                      alt={item.product.name}
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  )}
 
-                {/* Fallback Brand Badge */}
-                <div
-                  className="absolute inset-0 flex items-center justify-center font-bold text-white shadow-xs -z-10"
-                  style={{ backgroundColor: item.product.imageColor || '#18181B' }}
-                >
-                  <span className="text-[11px] font-extrabold tracking-wider font-mono">
-                    {item.product.weight}
-                  </span>
-                </div>
-
-                {/* Rank Badge */}
-                <div className="absolute top-1 left-1">
-                  <span className={`px-1 py-0.2 rounded text-[8px] font-black font-mono shadow-2xs border ${rankStyle}`}>
-                    #{idx + 1}
-                  </span>
-                </div>
-              </div>
-
-              {/* Details */}
-              <div className="flex flex-col flex-1 justify-between">
-                <div>
-                  <h4
-                    className="text-[11px] font-bold text-zinc-900 line-clamp-1 leading-snug"
-                    title={item.product.name}
+                  {/* Fallback Brand Badge */}
+                  <div
+                    className="absolute inset-0 flex items-center justify-center font-bold text-white shadow-xs -z-10"
+                    style={{ backgroundColor: item.product.imageColor || '#18181B' }}
                   >
-                    {item.product.name}
-                  </h4>
-                  <span className="text-[9px] text-zinc-400 font-medium block">
-                    {item.product.weight}
-                  </span>
+                    <span className="text-[11px] font-extrabold tracking-wider font-mono">
+                      {item.product.weight}
+                    </span>
+                  </div>
+
+                  {/* Rank Badge */}
+                  <div className="absolute top-1 left-1">
+                    <span className={`px-1 py-0.2 rounded text-[8px] font-black font-mono shadow-2xs border ${rankStyle}`}>
+                      #{idx + 1}
+                    </span>
+                  </div>
                 </div>
 
-                {/* Price & Sold Count (NO + icon) */}
-                <div className="mt-1.5 pt-1 border-t border-zinc-100 flex items-center justify-between">
-                  <span className="text-[11px] font-black text-zinc-900 font-mono">
-                    Rs. {item.product.price.toLocaleString('en-LK', { minimumFractionDigits: 0 })}
-                  </span>
+                {/* Details */}
+                <div className="flex flex-col flex-1 justify-between">
+                  <div>
+                    <h4
+                      className="text-[11px] font-bold text-zinc-900 line-clamp-1 leading-snug"
+                      title={item.product.name}
+                    >
+                      {item.product.name}
+                    </h4>
+                    <span className="text-[9px] text-zinc-400 font-medium block">
+                      {item.product.weight}
+                    </span>
+                  </div>
 
-                  <span className="text-[9px] font-bold text-emerald-700 font-mono bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
-                    {item.unitsSold} sold
-                  </span>
+                  {/* Price & Sold Count */}
+                  <div className="mt-1.5 pt-1 border-t border-zinc-100 flex items-center justify-between">
+                    <span className="text-[11px] font-black text-zinc-900 font-mono">
+                      Rs. {item.product.price.toLocaleString('en-LK', { minimumFractionDigits: 0 })}
+                    </span>
+
+                    <span className="text-[9px] font-bold text-emerald-700 font-mono bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                      {item.unitsSold} sold
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

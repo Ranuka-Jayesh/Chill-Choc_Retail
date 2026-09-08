@@ -4,7 +4,7 @@ import { Product } from '@/types';
 import { usePrinter } from '@/hooks/usePrinter';
 import { useToast } from '@/stores/toastStore';
 import { generateTSPLLabel, LabelSize } from '@/services/tsplGenerator';
-import { generateESCPOSLabel, generateCode39SvgHtml } from '@/services/escposLabelGenerator';
+import { generateESCPOSLabel, generateBarcodeSvgHtml } from '@/services/escposLabelGenerator';
 import {
   LABEL_SIZE_CONFIGS,
   ORDERED_LABEL_SIZES,
@@ -157,16 +157,16 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
             flex-shrink: 0;
           }
           .brand-title {
-            font-family: Georgia, "Times New Roman", Times, serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             font-weight: 900;
             font-size: ${cfg.brandFontSizePt}pt;
             line-height: 1;
-            letter-spacing: -0.2px;
+            letter-spacing: 0.1px;
             color: #000000;
           }
           .brand-tagline {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            font-weight: 400;
+            font-weight: 500;
             font-size: ${cfg.taglineFontSizePt}pt;
             line-height: 1;
             color: #000000;
@@ -183,8 +183,9 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
             overflow: hidden;
             text-overflow: ellipsis;
             word-break: break-word;
+            text-transform: capitalize;
             max-width: 100%;
-            margin-top: 0.3mm;
+            margin-top: 0.25mm;
           }
           .price-big {
             font-size: ${cfg.priceFontSizePt}pt;
@@ -192,14 +193,14 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             line-height: 1;
             color: #000000;
-            letter-spacing: -0.3px;
+            letter-spacing: -0.2px;
             margin-top: 0.3mm;
           }
           .price-unit {
-            font-size: ${Math.max(4.5, Math.round(cfg.priceFontSizePt * 0.5))}pt;
+            font-size: ${Math.max(4.2, Math.round(cfg.priceFontSizePt * 0.52))}pt;
             font-weight: 700;
             color: #000000;
-            margin-left: 0.5mm;
+            margin-left: 0.4mm;
           }
           .barcode-box {
             width: 100%;
@@ -208,15 +209,16 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
             align-items: center;
             justify-content: center;
             margin-top: auto;
+            margin-bottom: 0.1mm;
             flex-shrink: 0;
           }
           .barcode-text {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
+            font-family: "Courier New", Courier, monospace, sans-serif;
             font-size: ${cfg.barcodeFontSizePt}pt;
             font-weight: 700;
-            letter-spacing: 0.6px;
+            letter-spacing: 0.8px;
             line-height: 1;
-            margin-top: 0.15mm;
+            margin-top: 0.25mm;
             color: #000000;
           }
         </style>
@@ -234,7 +236,7 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
             <div class="price-big">Rs. ${formattedPrice}${measurementSuffix}</div>
           </div>
           <div class="barcode-box">
-            ${generateCode39SvgHtml(activeBarcode, cfg.barcodeSvgHeight, cfg.barcodeMaxBarWidth)}
+            ${generateBarcodeSvgHtml(activeBarcode, cfg.barcodeSvgHeight, 34)}
             <div class="barcode-text">${activeBarcode}</div>
           </div>
         </div>
@@ -400,26 +402,13 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 bg-zinc-50 p-1 rounded-xl border border-zinc-200">
-              {ORDERED_LABEL_SIZES.map((sz) => {
-                const cfg = LABEL_SIZE_CONFIGS[sz];
-                const isSelected = labelSize === sz;
-                return (
-                  <button
-                    key={sz}
-                    type="button"
-                    onClick={() => setLabelSize(sz)}
-                    className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-black text-white shadow-xs'
-                        : 'text-zinc-600 hover:text-black hover:bg-white'
-                    }`}
-                    title={cfg.name}
-                  >
-                    <span className="leading-tight font-mono">{cfg.name.replace(' mm', '')}</span>
-                  </button>
-                );
-              })}
+            <div className="flex items-center justify-between p-2 rounded-xl bg-zinc-50 border border-zinc-200">
+              <span className="text-[11px] font-bold text-zinc-700 uppercase tracking-wider">
+                Sticker Size
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-black text-white font-mono text-xs font-bold shadow-2xs">
+                40 × 20 mm
+              </span>
             </div>
           </div>
         </div>

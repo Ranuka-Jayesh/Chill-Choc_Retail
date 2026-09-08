@@ -4,7 +4,6 @@ import { useCart } from '@/stores/cartStore';
 import { useCashier } from '@/stores/cashierStore';
 import { useSales } from '@/stores/salesStore';
 import { PaymentMethod, PaymentTender, CompletedSale } from '@/types';
-import { MOCK_SALESPERSONS } from '@/data/mockEmployees';
 
 interface RightBillingPanelProps {
   onPaymentSuccess: (sale: CompletedSale) => void;
@@ -221,7 +220,7 @@ export const RightBillingPanel: React.FC<RightBillingPanelProps> = ({
     const effectiveSalesperson =
       defaultSalesperson ||
       items.find((i) => i.salesperson)?.salesperson ||
-      MOCK_SALESPERSONS[0];
+      null;
 
     const sale = completeSale({
       items,

@@ -1,6 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { MOCK_PRODUCTS } from '@/data/mockProducts';
 import { ConfectionCategory, CartItem as CartItemType, CompletedSale, Salesperson, Product } from '@/types';
 import { useProducts } from '@/stores/productStore';
 import { useCart } from '@/stores/cartStore';

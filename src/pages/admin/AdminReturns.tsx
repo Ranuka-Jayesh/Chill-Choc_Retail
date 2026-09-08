@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AdminLayout } from '@/components/admin/AdminLayout';
-import { useReturns } from '@/stores/returnsStore';
+import { useReturns, isDummyReturn } from '@/stores/returnsStore';
 import { useSupplierReturns } from '@/stores/supplierReturnsStore';
 import { useToast } from '@/stores/toastStore';
 import { ReturnRequest, ReturnItem, SupplierReturn } from '@/types';
@@ -111,14 +111,18 @@ export const AdminReturns: React.FC = () => {
     item: ReturnItem;
   } | null>(null);
 
-  const pendingCount = useMemo(() => {
-    return returnRequests.filter((r) => r.status === 'Pending Admin Approval').length;
+  const cleanReturnRequests = useMemo(() => {
+    return returnRequests.filter((r) => !isDummyReturn(r));
   }, [returnRequests]);
+
+  const pendingCount = useMemo(() => {
+    return cleanReturnRequests.filter((r) => r.status === 'Pending Admin Approval').length;
+  }, [cleanReturnRequests]);
 
   // Listen for real-time returns from cashier
   useEffect(() => {
     const unsub = returnsSyncSocket.subscribe((msg) => {
-      if (msg.type === 'RETURN_REQUESTED') {
+      if (msg.type === 'RETURN_REQUESTED' && !isDummyReturn(msg.payload)) {
         showToast(`🔔 New Return Request: ${msg.payload.returnCode} (${msg.payload.invoiceNumber}) received from Cashier!`, 'warning');
         // Ensure the admin sees it by not hiding pending items
         setStatusFilter((curr) => (curr === 'approved' ? 'all' : curr));
@@ -130,7 +134,7 @@ export const AdminReturns: React.FC = () => {
 
   // Filter Tab 1: Customer Refund Approvals
   const filteredCustomerReturns = useMemo(() => {
-    return returnRequests.filter((req) => {
+    return cleanReturnRequests.filter((req) => {
       // Month filter
       if (!isDateInSelectedMonth(req.date, req.timestamp, selectedMonth)) {
         return false;
@@ -318,7 +322,7 @@ export const AdminReturns: React.FC = () => {
                     : 'text-zinc-500 hover:text-zinc-800'
                 }`}
               >
-                All ({returnRequests.length})
+                All ({cleanReturnRequests.length})
               </button>
               <span className="text-zinc-300">&bull;</span>
               <button

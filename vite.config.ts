@@ -79,15 +79,32 @@ function posWebSocketSyncPlugin(): Plugin {
         });
       });
 
+      const isDummyRet = (r: any) => {
+        if (!r) return false;
+        const c = (r.returnCode || '').toUpperCase();
+        const inv = (r.invoiceNumber || '').toUpperCase();
+        return (
+          c === 'RET-000391' ||
+          c === 'RET-000390' ||
+          c === 'RET-000389' ||
+          inv === 'INV-001825' ||
+          inv === 'INV-001820' ||
+          inv === 'INV-001802'
+        );
+      };
+
       // 2. Returns & Refunds WebSocket connection
       returnsWss.on('connection', (ws) => {
         console.log(`[POS-WS Returns] Client connected. Active: ${returnsWss!.clients.size}`);
 
         if (cachedReturns && cachedReturns.length > 0) {
-          try {
-            ws.send(JSON.stringify({ type: 'SYNC_RETURNS', payload: cachedReturns }));
-          } catch (e) {
-            console.error('[POS-WS Returns] Initial sync error:', e);
+          cachedReturns = cachedReturns.filter((r: any) => !isDummyRet(r));
+          if (cachedReturns.length > 0) {
+            try {
+              ws.send(JSON.stringify({ type: 'SYNC_RETURNS', payload: cachedReturns }));
+            } catch (e) {
+              console.error('[POS-WS Returns] Initial sync error:', e);
+            }
           }
         }
 
@@ -97,8 +114,8 @@ function posWebSocketSyncPlugin(): Plugin {
             const message = JSON.parse(raw);
 
             if (message.type === 'SYNC_RETURNS' && Array.isArray(message.payload)) {
-              cachedReturns = message.payload;
-            } else if (message.type === 'RETURN_REQUESTED' && message.payload) {
+              cachedReturns = message.payload.filter((r: any) => !isDummyRet(r));
+            } else if (message.type === 'RETURN_REQUESTED' && message.payload && !isDummyRet(message.payload)) {
               if (!cachedReturns) cachedReturns = [];
               if (!cachedReturns.some((r: any) => r.id === message.payload.id || r.returnCode === message.payload.returnCode)) {
                 cachedReturns.unshift(message.payload);

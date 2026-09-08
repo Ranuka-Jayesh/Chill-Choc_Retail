@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ReturnRequest, ReturnItem, ExchangeItemDetails } from '@/types';
 import { returnsSyncSocket } from '@/services/returnsSyncSocket';
+import {
+  fetchReturnRequestsFromSupabase,
+  insertReturnRequestToSupabase,
+  updateReturnRequestInSupabase,
+  generateUUID,
+} from '@/services/supabaseData';
 
 interface ReturnsContextType {
   returnRequests: ReturnRequest[];
@@ -17,125 +23,39 @@ interface ReturnsContextType {
   linkSupplierReturn: (returnRequestId: string, supplierReturnId: string) => void;
 }
 
-const INITIAL_RETURNS: ReturnRequest[] = [
-  {
-    id: 'ret-000391',
-    returnCode: 'RET-000391',
-    invoiceNumber: 'INV-001825',
-    date: '2026-09-08',
-    timestamp: '08:45 AM',
-    resolutionType: 'refund',
-    items: [
-      {
-        productId: 'prod-mars',
-        productName: 'Mars Bar 51g',
-        quantity: 1,
-        unitPrice: 480,
-        reason: 'Damaged',
-        returnToStock: false,
-        refundAmount: 480,
-        supplierId: 'sup-mars',
-        supplierName: 'Mars Global Foods Importers',
-        batchNumber: 'LOT-MARS-081',
-      },
-    ],
-    totalRefund: 480,
-    status: 'Pending Admin Approval',
-    submittedBy: 'Nimal Perera',
-  },
-  {
-    id: 'ret-000390',
-    returnCode: 'RET-000390',
-    invoiceNumber: 'INV-001820',
-    date: '2026-09-07',
-    timestamp: 'Yesterday, 03:15 PM',
-    resolutionType: 'same_replacement',
-    items: [
-      {
-        productId: 'prod-kitkat',
-        productName: 'KitKat Chunky 40g',
-        quantity: 2,
-        unitPrice: 450,
-        reason: 'Quality Issue',
-        returnToStock: false,
-        refundAmount: 900,
-        supplierId: 'sup-nestle',
-        supplierName: 'Nestlé Lanka PLC',
-        batchNumber: 'LOT-NES-401',
-      },
-    ],
-    totalRefund: 900,
-    status: 'Approved',
-    submittedBy: 'Nimal Perera',
-    reviewedAt: 'Yesterday, 03:30 PM',
-    reviewedBy: 'Chaminda Silva (Admin)',
-    reviewNotes: 'Customer refund paid out. Dispatched to Nestlé for warranty credit.',
-    supplierReturnId: 'rtv-100',
-  },
-  {
-    id: 'ret-000389',
-    returnCode: 'RET-000389',
-    invoiceNumber: 'INV-001802',
-    date: '2026-09-02',
-    timestamp: '02 Sept 2026, 11:10 AM',
-    resolutionType: 'refund',
-    items: [
-      {
-        productId: 'prod-toblerone',
-        productName: 'Toblerone Milk 100g',
-        quantity: 1,
-        unitPrice: 850,
-        reason: 'Expired',
-        returnToStock: false,
-        refundAmount: 850,
-        supplierId: 'sup-mondelez',
-        supplierName: 'Mondelēz International',
-        batchNumber: 'LOT-MDZ-109',
-      },
-    ],
-    totalRefund: 850,
-    status: 'Approved',
-    submittedBy: 'Kasun Bandara',
-    reviewedAt: '02 Sept 2026, 11:45 AM',
-    reviewedBy: 'Chaminda Silva (Admin)',
-    reviewNotes: 'Expired stock quarantined immediately.',
-  },
-  {
-    id: 'ret-000388',
-    returnCode: 'RET-000388',
-    invoiceNumber: 'INV-001712',
-    date: '2026-08-28',
-    timestamp: '28 Aug 2026, 04:30 PM',
-    resolutionType: 'exchange',
-    exchangeItem: {
-      productId: 'prod-mars',
-      productName: 'Mars Bar 51g',
-      unitPrice: 480,
-      quantity: 1,
-      totalValue: 480,
-      priceDifference: 60,
-    },
-    items: [
-      {
-        productId: 'prod-snickers',
-        productName: 'Snickers Single 50g',
-        quantity: 1,
-        unitPrice: 420,
-        reason: 'Packaging Defect',
-        returnToStock: false,
-        refundAmount: 420,
-        supplierId: 'sup-mars',
-        supplierName: 'Mars Global Foods Importers',
-        batchNumber: 'LOT-MARS-072',
-      },
-    ],
-    totalRefund: 420,
-    status: 'Approved',
-    submittedBy: 'Nimal Perera',
-    reviewedAt: '28 Aug 2026, 05:00 PM',
-    reviewedBy: 'Chaminda Silva (Admin)',
-  },
-];
+export const isDummyReturn = (r: ReturnRequest | any): boolean => {
+  if (!r) return false;
+  const code = (r.returnCode || '').toUpperCase();
+  const inv = (r.invoiceNumber || '').toUpperCase();
+  const id = (r.id || '').toLowerCase();
+  if (
+    code === 'RET-000391' ||
+    code === 'RET-000390' ||
+    code === 'RET-000389' ||
+    id === 'ret-000391' ||
+    id === 'ret-000390' ||
+    id === 'ret-000389' ||
+    inv === 'INV-001825' ||
+    inv === 'INV-001820' ||
+    inv === 'INV-001802'
+  ) {
+    return true;
+  }
+
+  if (Array.isArray(r.items)) {
+    const hasMockItem = r.items.some(
+      (it: any) =>
+        it.batchNumber === 'LOT-MARS-001' ||
+        it.batchNumber === 'LOT-NES-401' ||
+        it.batchNumber === 'LOT-MDZ-109'
+    );
+    if (hasMockItem) return true;
+  }
+
+  return false;
+};
+
+const INITIAL_RETURNS: ReturnRequest[] = [];
 
 const ReturnsContext = createContext<ReturnsContextType | undefined>(undefined);
 
@@ -146,8 +66,12 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const saved = localStorage.getItem('chill_choc_return_requests');
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
+          if (Array.isArray(parsed)) {
+            const clean = parsed.filter((r) => !isDummyReturn(r));
+            if (clean.length !== parsed.length) {
+              localStorage.setItem('chill_choc_return_requests', JSON.stringify(clean));
+            }
+            return clean;
           }
         }
       } catch (e) {
@@ -157,11 +81,29 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return INITIAL_RETURNS;
   });
 
+  // Fetch initial return requests from Supabase
+  useEffect(() => {
+    let isMounted = true;
+    fetchReturnRequestsFromSupabase().then((data) => {
+      if (isMounted && Array.isArray(data)) {
+        const clean = data.filter((r) => !isDummyReturn(r));
+        setReturnRequests(clean);
+        try {
+          localStorage.setItem('chill_choc_return_requests', JSON.stringify(clean));
+        } catch {}
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Persist returnRequests to localStorage whenever updated
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem('chill_choc_return_requests', JSON.stringify(returnRequests));
+        const clean = returnRequests.filter((r) => !isDummyReturn(r));
+        localStorage.setItem('chill_choc_return_requests', JSON.stringify(clean));
       } catch (e) {
         console.error('Failed to save returnRequests to localStorage', e);
       }
@@ -175,7 +117,7 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         try {
           const updated = JSON.parse(e.newValue);
           if (Array.isArray(updated)) {
-            setReturnRequests(updated);
+            setReturnRequests(updated.filter((r) => !isDummyReturn(r)));
           }
         } catch {}
       }
@@ -184,7 +126,7 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     window.addEventListener('storage', handleStorageChange);
 
     const unsubscribe = returnsSyncSocket.subscribe((msg) => {
-      if (msg.type === 'RETURN_REQUESTED') {
+      if (msg.type === 'RETURN_REQUESTED' && msg.payload && !isDummyReturn(msg.payload)) {
         setReturnRequests((prev) => {
           if (prev.some((r) => r.id === msg.payload.id || r.returnCode === msg.payload.returnCode)) {
             return prev;
@@ -196,7 +138,11 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
           return updated;
         });
       } else if (msg.type === 'SYNC_RETURNS' && Array.isArray(msg.payload)) {
-        setReturnRequests(msg.payload);
+        const clean = msg.payload.filter((r) => !isDummyReturn(r));
+        setReturnRequests(clean);
+        try {
+          localStorage.setItem('chill_choc_return_requests', JSON.stringify(clean));
+        } catch {}
       } else if (msg.type === 'RETURN_APPROVED') {
         setReturnRequests((prev) =>
           prev.map((r) =>
@@ -205,7 +151,7 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   ...r,
                   status: 'Approved',
                   reviewedAt: 'Just now',
-                  reviewedBy: msg.payload.reviewerName || 'Chaminda Silva (Admin)',
+                  reviewedBy: msg.payload.reviewerName || 'Admin',
                   reviewNotes: msg.payload.notes || 'Approved by store admin',
                 }
               : r
@@ -219,7 +165,7 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   ...r,
                   status: 'Rejected',
                   reviewedAt: 'Just now',
-                  reviewedBy: msg.payload.reviewerName || 'Chaminda Silva (Admin)',
+                  reviewedBy: msg.payload.reviewerName || 'Admin',
                   reviewNotes: msg.payload.notes || 'Rejected by store admin',
                 }
               : r
@@ -249,10 +195,17 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     resolutionType?: 'refund' | 'same_replacement' | 'exchange';
     exchangeItem?: ExchangeItemDetails;
   }) => {
-    const nextNum = 392 + returnRequests.length;
-    const nextCode = `RET-${String(nextNum).padStart(6, '0')}`;
+    let maxNum = 0;
+    for (const r of returnRequests) {
+      const match = r.returnCode?.match(/RET-(\d+)/i);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (!isNaN(val) && val > maxNum) maxNum = val;
+      }
+    }
+    const nextCode = `RET-${String(maxNum + 1).padStart(6, '0')}`;
     const newRequest: ReturnRequest = {
-      id: `ret-${Date.now()}`,
+      id: generateUUID(),
       returnCode: nextCode,
       invoiceNumber,
       date: new Date().toISOString().split('T')[0],
@@ -267,6 +220,9 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     setReturnRequests((prev) => [newRequest, ...prev]);
 
+    // Sync to Supabase cloud
+    insertReturnRequestToSupabase(newRequest);
+
     // Broadcast across tabs and network
     returnsSyncSocket.send({
       type: 'RETURN_REQUESTED',
@@ -276,7 +232,7 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return newRequest;
   };
 
-  const approveReturn = (id: string, notes = '', reviewerName = 'Chaminda Silva (Admin)') => {
+  const approveReturn = (id: string, notes = '', reviewerName = 'Admin') => {
     setReturnRequests((prev) =>
       prev.map((r) =>
         r.id === id
@@ -291,6 +247,9 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
       )
     );
 
+    // Sync to Supabase cloud
+    updateReturnRequestInSupabase(id, 'Approved', notes || 'Approved by store admin', reviewerName);
+
     // Broadcast approval
     returnsSyncSocket.send({
       type: 'RETURN_APPROVED',
@@ -298,7 +257,7 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
-  const rejectReturn = (id: string, notes = '', reviewerName = 'Chaminda Silva (Admin)') => {
+  const rejectReturn = (id: string, notes = '', reviewerName = 'Admin') => {
     setReturnRequests((prev) =>
       prev.map((r) =>
         r.id === id
@@ -312,6 +271,9 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
           : r
       )
     );
+
+    // Sync to Supabase cloud
+    updateReturnRequestInSupabase(id, 'Rejected', notes || 'Rejected by store admin', reviewerName);
 
     // Broadcast rejection
     returnsSyncSocket.send({

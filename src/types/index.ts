@@ -228,6 +228,7 @@ export interface CashMovement {
 }
 
 export interface CashSession {
+  id?: string;
   cashier: string;
   register: string;
   startedAt: string;

@@ -1,7 +1,14 @@
 import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
 import { Product, ProductBatch, ConfectionCategory } from '@/types';
-import { MOCK_PRODUCTS } from '@/data/mockProducts';
 import { productSyncSocket } from '@/services/productSyncSocket';
+import {
+  fetchProductsFromSupabase,
+  upsertProductToSupabase,
+  deleteProductFromSupabase,
+  insertBatchToSupabase,
+  updateBatchRemainingInSupabase,
+  generateUUID,
+} from '@/services/supabaseData';
 
 export interface RestockParams {
   productId: string;
@@ -59,191 +66,7 @@ interface ProductContextType {
   getBatchesForProduct: (productId: string) => ProductBatch[];
 }
 
-// Prepopulate MOCK_PRODUCTS with realistic multi-supplier batches
-const INITIAL_PRODUCTS_WITH_BATCHES: Product[] = MOCK_PRODUCTS.map((prod) => {
-  if (prod.id === 'prod-kitkat') {
-    const batches: ProductBatch[] = [
-      {
-        id: 'batch-kit-1',
-        productId: prod.id,
-        supplierId: 'sup-nestle',
-        supplierName: 'Nestlé Lanka PLC',
-        batchNumber: 'LOT-NES-401',
-        costPrice: 360,
-        sellingPrice: 450,
-        receivedDate: '01 Aug 2026',
-        expiryDate: '20 Aug 2026',
-        quantityReceived: 10,
-        quantityRemaining: 3,
-      },
-      {
-        id: 'batch-kit-1b',
-        productId: prod.id,
-        supplierId: 'sup-nestle',
-        supplierName: 'Nestlé Lanka PLC',
-        batchNumber: 'LOT-NES-402',
-        costPrice: 365,
-        sellingPrice: 450,
-        receivedDate: '12 Aug 2026',
-        expiryDate: '15 Dec 2026',
-        quantityReceived: 15,
-        quantityRemaining: 9,
-      },
-      {
-        id: 'batch-kit-2',
-        productId: prod.id,
-        supplierId: 'sup-metro',
-        supplierName: 'Metro Confectionery Wholesale',
-        batchNumber: 'LOT-MET-908',
-        costPrice: 375,
-        sellingPrice: 450,
-        receivedDate: '20 Aug 2026',
-        expiryDate: '20 Jan 2027',
-        quantityReceived: 15,
-        quantityRemaining: 13,
-      },
-    ];
-    return {
-      ...prod,
-      costPrice: 365,
-      batches,
-      stock: 25,
-    };
-  }
-
-  if (prod.id === 'prod-snickers') {
-    const batches: ProductBatch[] = [
-      {
-        id: 'batch-snk-1',
-        productId: prod.id,
-        supplierId: 'sup-mars',
-        supplierName: 'Mars Global Foods Importers',
-        batchNumber: 'LOT-MARS-081',
-        costPrice: 400,
-        sellingPrice: 500,
-        receivedDate: '10 Aug 2026',
-        expiryDate: '10 Nov 2026',
-        quantityReceived: 10,
-        quantityRemaining: 4,
-      },
-      {
-        id: 'batch-snk-1b',
-        productId: prod.id,
-        supplierId: 'sup-mars',
-        supplierName: 'Mars Global Foods Importers',
-        batchNumber: 'LOT-MARS-082',
-        costPrice: 405,
-        sellingPrice: 500,
-        receivedDate: '18 Aug 2026',
-        expiryDate: '28 Feb 2027',
-        quantityReceived: 10,
-        quantityRemaining: 8,
-      },
-      {
-        id: 'batch-snk-2',
-        productId: prod.id,
-        supplierId: 'sup-metro',
-        supplierName: 'Metro Confectionery Wholesale',
-        batchNumber: 'LOT-MET-994',
-        costPrice: 410,
-        sellingPrice: 500,
-        receivedDate: '25 Aug 2026',
-        expiryDate: '05 Feb 2027',
-        quantityReceived: 6,
-        quantityRemaining: 6,
-      },
-    ];
-    return {
-      ...prod,
-      costPrice: 405,
-      batches,
-      stock: batches.reduce((sum, b) => sum + b.quantityRemaining, 0), // 18
-    };
-  }
-
-  if (prod.id === 'prod-toblerone') {
-    const batches: ProductBatch[] = [
-      {
-        id: 'batch-tob-1',
-        productId: prod.id,
-        supplierId: 'sup-mondelez',
-        supplierName: 'Mondelēz International Distributors',
-        batchNumber: 'LOT-MDZ-102',
-        costPrice: 950,
-        sellingPrice: 1200,
-        receivedDate: '15 Aug 2026',
-        expiryDate: '15 Mar 2027',
-        quantityReceived: 6,
-        quantityRemaining: 4,
-      },
-      {
-        id: 'batch-tob-2',
-        productId: prod.id,
-        supplierId: 'sup-mondelez',
-        supplierName: 'Mondelēz International Distributors',
-        batchNumber: 'LOT-MDZ-103',
-        costPrice: 960,
-        sellingPrice: 1200,
-        receivedDate: '25 Aug 2026',
-        expiryDate: '20 Jun 2027',
-        quantityReceived: 10,
-        quantityRemaining: 8,
-      },
-    ];
-    return {
-      ...prod,
-      costPrice: 955,
-      batches,
-      stock: 12,
-    };
-  }
-
-  // Cotton candy with an expired batch for demonstration & filter testing
-  if (prod.id === 'prod-cotton-candy') {
-    const expiredBatch: ProductBatch = {
-      id: `batch-${prod.id}-init`,
-      productId: prod.id,
-      supplierId: 'sup-metro',
-      supplierName: 'Metro Confectionery Wholesale',
-      batchNumber: 'LOT-COT-08',
-      costPrice: 240,
-      sellingPrice: 350,
-      receivedDate: '28 Jul 2026',
-      expiryDate: '25 Aug 2026',
-      quantityReceived: 12,
-      quantityRemaining: 12,
-    };
-    return {
-      ...prod,
-      costPrice: 240,
-      expiryDate: '25 Aug 2026',
-      batches: [expiredBatch],
-      stock: 12,
-    };
-  }
-
-  // Default fallback for other products: single batch from a default supplier
-  const defaultBatch: ProductBatch = {
-    id: `batch-${prod.id}-init`,
-    productId: prod.id,
-    supplierId: 'sup-metro',
-    supplierName: 'Metro Confectionery Wholesale',
-    batchNumber: `LOT-${prod.sku.replace('CC-', '')}-01`,
-    costPrice: Math.round(prod.price * 0.78),
-    sellingPrice: prod.price,
-    receivedDate: '12 Aug 2026',
-    expiryDate: '28 Feb 2027',
-    quantityReceived: prod.stock,
-    quantityRemaining: prod.stock,
-  };
-
-  return {
-    ...prod,
-    costPrice: defaultBatch.costPrice,
-    batches: [defaultBatch],
-    stock: prod.stock,
-  };
-});
+const INITIAL_PRODUCTS_WITH_BATCHES: Product[] = [];
 
 export const formatBatchDate = (d: Date = new Date()): string => {
   const day = String(d.getDate()).padStart(2, '0');
@@ -489,9 +312,25 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, []);
 
+  // Fetch initial products from Supabase cloud database
+  useEffect(() => {
+    let isMounted = true;
+    fetchProductsFromSupabase().then((data) => {
+      if (isMounted && Array.isArray(data) && data.length > 0) {
+        setProducts(data);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        } catch {}
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Recalculates product stock dynamically whenever batches update
   const addProduct = (productData: AddProductInput): Product => {
-    const newId = `prod-${Date.now().toString().slice(-6)}`;
+    const newId = generateUUID();
     const initialQty = productData.initialStock || 0;
     const barcode = productData.barcode || `890${Date.now().toString().slice(-9)}`;
     const cleanName = productData.name.trim();
@@ -501,12 +340,12 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       `CC-${cleanName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase()}-${cleanWeight.replace(/[^0-9]/g, '') || '00'}`;
 
     const batches: ProductBatch[] = [];
-    if (initialQty > 0 && productData.initialSupplierId) {
+    if (initialQty > 0) {
       batches.push({
-        id: `batch-${Date.now()}-1`,
+        id: generateUUID(),
         productId: newId,
-        supplierId: productData.initialSupplierId,
-        supplierName: productData.initialSupplierName || 'Supplier',
+        supplierId: productData.initialSupplierId || '',
+        supplierName: productData.initialSupplierName || 'Direct Stock',
         batchNumber: productData.batchNumber || `LOT-${Date.now().toString().slice(-4)}`,
         costPrice: productData.initialCost || 0,
         sellingPrice: productData.price || 0,
@@ -540,10 +379,16 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     setProducts((prev) => [newProduct, ...prev]);
     productSyncSocket.broadcastAdd(newProduct);
+
+    // Sync to Supabase cloud
+    upsertProductToSupabase(newProduct);
+    batches.forEach((b) => insertBatchToSupabase(b));
+
     return newProduct;
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
+    let changedProd: Product | undefined;
     setProducts((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
@@ -551,9 +396,14 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (updated.batches) {
           updated.stock = updated.batches.reduce((sum, b) => sum + b.quantityRemaining, 0);
         }
+        changedProd = updated;
         return updated;
       })
     );
+
+    if (changedProd) {
+      upsertProductToSupabase(changedProd);
+    }
 
     if (updates.isAvailable !== undefined) {
       productSyncSocket.broadcastAvailability(id, updates.isAvailable);
@@ -571,7 +421,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newBatches: ProductBatch[] = paramsList.map((item) => {
       const normalizedExp = normalizeExpiryDate(item.expiryDate);
       return {
-        id: `batch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: generateUUID(),
         productId: item.productId,
         supplierId: item.supplierId,
         supplierName: item.supplierName,
@@ -584,6 +434,9 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
         quantityRemaining: item.quantity,
       };
     });
+
+    // Sync new batches to Supabase
+    newBatches.forEach((b) => insertBatchToSupabase(b));
 
     setProducts((prev) => {
       const updatedList = prev.map((p) => {
@@ -598,7 +451,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
           0
         );
 
-        return {
+        const updatedProd = {
           ...p,
           price: latestItem && latestItem.sellingPrice > 0 ? latestItem.sellingPrice : p.price,
           costPrice: latestItem && latestItem.costPrice > 0 ? latestItem.costPrice : p.costPrice,
@@ -607,6 +460,11 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
           batches: updatedBatches,
           stock: combinedStock,
         };
+
+        // Sync stock to Supabase
+        upsertProductToSupabase(updatedProd);
+
+        return updatedProd;
       });
 
       // Synchronously write to localStorage to prevent data loss on navigation or reload
@@ -630,6 +488,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const deleteProduct = (id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
     productSyncSocket.broadcastDelete(id);
+    deleteProductFromSupabase(id);
   };
 
   const getProductById = (id: string) => {
@@ -721,6 +580,17 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } catch (err) {
         console.error('Failed to persist products to storage after stock deduction:', err);
       }
+
+      // Sync updated stocks and batches to Supabase cloud
+      deductions.forEach((d) => {
+        const prod = updatedList.find((p) => p.id === d.productId);
+        if (prod) {
+          upsertProductToSupabase(prod);
+          prod.batches?.forEach((b) => {
+            updateBatchRemainingInSupabase(b.id, b.quantityRemaining);
+          });
+        }
+      });
 
       productSyncSocket.broadcastSyncAll(updatedList);
       return updatedList;

@@ -1,14 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ConfectionCategory } from '@/types';
-import {
-  Sparkles,
-  Candy,
-  Cookie,
-  CupSoda,
-  Gift,
-  MoreHorizontal,
-  Layers,
-} from 'lucide-react';
+import { Layers, Tag } from 'lucide-react';
+import { useProducts } from '@/stores/productStore';
 
 interface CategoryFilterProps {
   selectedCategory: ConfectionCategory;
@@ -16,45 +9,75 @@ interface CategoryFilterProps {
   categoryCounts?: Record<ConfectionCategory, number>;
 }
 
-interface CategoryOption {
-  id: ConfectionCategory;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-const CATEGORIES: CategoryOption[] = [
-  { id: 'all', label: 'All', icon: Layers },
-  { id: 'chocolate', label: 'Chocolate', icon: Sparkles },
-  { id: 'toffees', label: 'Toffees', icon: Candy },
-  { id: 'biscuits', label: 'Biscuits', icon: Cookie },
-  { id: 'drinks', label: 'Drinks', icon: CupSoda },
-  { id: 'gifts', label: 'Gifts', icon: Gift },
-  { id: 'others', label: 'Others', icon: MoreHorizontal },
-];
-
 export const CategoryFilter: React.FC<CategoryFilterProps> = ({
   selectedCategory,
   onSelectCategory,
   categoryCounts,
 }) => {
+  const { products } = useProducts();
+
+  // Dynamically compute categories from configured categories & active products
+  const categories = useMemo(() => {
+    const list: Array<{ id: ConfectionCategory; label: string }> = [
+      { id: 'all', label: 'All Items' },
+    ];
+
+    try {
+      const saved = localStorage.getItem('chill_choc_category_items_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((c: any) => {
+            if (c.id !== 'all' && !list.some((item) => item.id.toLowerCase() === c.id.toLowerCase())) {
+              list.push({ id: c.id, label: c.name || c.id });
+            }
+          });
+        }
+      }
+    } catch {}
+
+    // Also include any categories from existing products
+    products.forEach((p) => {
+      if (p.category && p.category !== 'all') {
+        const catId = p.category.toLowerCase() as ConfectionCategory;
+        if (!list.some((item) => item.id.toLowerCase() === catId)) {
+          list.push({
+            id: catId,
+            label: p.category.charAt(0).toUpperCase() + p.category.slice(1),
+          });
+        }
+      }
+    });
+
+    return list;
+  }, [products]);
+
+  // If only "All Items" exists and there are no products, render minimal indicator
+  if (categories.length <= 1 && products.length === 0) {
+    return null;
+  }
+
   return (
     <div className="flex items-center gap-2 overflow-x-auto py-1 scrollbar-none no-scrollbar select-none">
-      {CATEGORIES.map((cat) => {
+      {categories.map((cat) => {
         const isSelected = selectedCategory === cat.id;
-        const Icon = cat.icon;
         const count = categoryCounts ? categoryCounts[cat.id] : undefined;
 
         return (
           <button
             key={cat.id}
             onClick={() => onSelectCategory(cat.id)}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all duration-150 flex-shrink-0 ${
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all duration-150 flex-shrink-0 cursor-pointer ${
               isSelected
                 ? 'bg-black text-white shadow-xs ring-1 ring-black'
                 : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-50 hover:border-zinc-400'
             }`}
           >
-            <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-[#FF5500]' : 'text-zinc-500'}`} />
+            {cat.id === 'all' ? (
+              <Layers className={`w-3.5 h-3.5 ${isSelected ? 'text-[#FF5500]' : 'text-zinc-500'}`} />
+            ) : (
+              <Tag className={`w-3.5 h-3.5 ${isSelected ? 'text-[#FF5500]' : 'text-zinc-500'}`} />
+            )}
             <span>{cat.label}</span>
             {count !== undefined && (
               <span

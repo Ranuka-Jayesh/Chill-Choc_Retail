@@ -48,7 +48,6 @@ export const AdminDashboard: React.FC = () => {
             value={`Rs. ${totalSalesRevenue.toLocaleString('en-LK', { minimumFractionDigits: 0 })}`}
             subtitle={`${sales.length} completed POS orders`}
             icon={DollarSign}
-            trend={{ value: '14.2%', isPositive: true }}
             badgeColor="bg-emerald-50 text-emerald-600"
           />
 

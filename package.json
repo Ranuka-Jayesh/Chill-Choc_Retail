@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "@types/jsbarcode": "^3.11.4",
     "clsx": "^2.1.1",
     "html2canvas": "^1.4.1",

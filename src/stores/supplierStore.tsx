@@ -1,6 +1,10 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Supplier } from '@/types';
-import { MOCK_SUPPLIERS } from '@/data/mockSuppliers';
+import {
+  fetchSuppliersFromSupabase,
+  upsertSupplierToSupabase,
+  generateUUID,
+} from '@/services/supabaseData';
 
 interface SupplierContextType {
   suppliers: Supplier[];
@@ -9,20 +13,63 @@ interface SupplierContextType {
   updateSupplier: (id: string, updates: Partial<Supplier>) => void;
 }
 
+const STORAGE_KEY = 'chill_choc_suppliers';
+
 const SupplierContext = createContext<SupplierContextType | undefined>(undefined);
 
 export const SupplierProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse suppliers from localStorage', e);
+    }
+    return [];
+  });
+
+  const persistSuppliers = (list: Supplier[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.warn('Failed to save suppliers to localStorage', e);
+    }
+  };
+
+  // Fetch initial suppliers from Supabase cloud database
+  useEffect(() => {
+    let isMounted = true;
+    fetchSuppliersFromSupabase().then((data) => {
+      if (isMounted && Array.isArray(data) && data.length > 0) {
+        setSuppliers(data);
+        persistSuppliers(data);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const addSupplier = (supplierData: Omit<Supplier, 'id' | 'code'>): Supplier => {
     const nextNum = suppliers.length + 1;
-    const code = `SUP-NEW-${String(nextNum).padStart(2, '0')}`;
+    const code = `SUP-${String(nextNum).padStart(3, '0')}`;
     const newSupplier: Supplier = {
       ...supplierData,
-      id: `sup-${Date.now()}`,
+      id: generateUUID(),
       code,
     };
-    setSuppliers((prev) => [newSupplier, ...prev]);
+    const updated = [newSupplier, ...suppliers];
+    setSuppliers(updated);
+    persistSuppliers(updated);
+
+    // Sync to Supabase cloud
+    upsertSupplierToSupabase(newSupplier);
+
     return newSupplier;
   };
 
@@ -31,9 +78,16 @@ export const SupplierProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const updateSupplier = (id: string, updates: Partial<Supplier>) => {
-    setSuppliers((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
-    );
+    const updated = suppliers.map((s) => {
+      if (s.id === id) {
+        const mod = { ...s, ...updates };
+        upsertSupplierToSupabase(mod);
+        return mod;
+      }
+      return s;
+    });
+    setSuppliers(updated);
+    persistSuppliers(updated);
   };
 
   return (

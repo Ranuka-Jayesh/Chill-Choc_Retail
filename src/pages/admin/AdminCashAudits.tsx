@@ -474,11 +474,24 @@ export const AdminCashAudits: React.FC = () => {
                 {filteredMovements.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-zinc-400">
-                      <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto px-4">
                         <Receipt className="w-8 h-8 text-zinc-300 stroke-1" />
-                        <span className="font-semibold text-xs text-zinc-500">
-                          No cash adjustments or expenses match the selected filters.
+                        <span className="font-bold text-xs text-zinc-700">
+                          {movementTypeFilter === 'Cash Out'
+                            ? 'No Cash Out / Bank Drop movements recorded yet.'
+                            : movementTypeFilter === 'Expense'
+                            ? 'No Store Expenses recorded yet.'
+                            : movementTypeFilter === 'Cash In'
+                            ? 'No Cash In / Float movements found.'
+                            : 'No cash adjustments or expenses match the selected filters.'}
                         </span>
+                        <p className="text-[11px] text-zinc-400">
+                          {movementTypeFilter === 'Cash Out'
+                            ? 'To review store expenses (tea, repairs, supplies), switch to the Expenses or All tab.'
+                            : movementTypeFilter === 'Expense'
+                            ? 'When cashiers log mid-shift expenses at the POS (F10), they will appear here instantaneously in real-time via WebSocket.'
+                            : 'All mid-shift Cash In, Cash Out, and Store Expenses logged by cashiers sync here live.'}
+                        </p>
                         {(movementTypeFilter !== 'all' || searchQuery || filterMode !== 'all') && (
                           <button
                             type="button"
@@ -490,7 +503,7 @@ export const AdminCashAudits: React.FC = () => {
                             }}
                             className="text-xs font-bold text-[#FF5500] hover:underline cursor-pointer mt-1"
                           >
-                            Reset all filters
+                            View All Cash Movements &amp; Expenses
                           </button>
                         )}
                       </div>

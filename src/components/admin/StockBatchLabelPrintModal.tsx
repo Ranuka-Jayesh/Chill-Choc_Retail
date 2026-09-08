@@ -3,7 +3,7 @@ import { usePrinter } from '@/hooks/usePrinter';
 import { useProducts } from '@/stores/productStore';
 import { useToast } from '@/stores/toastStore';
 import { generateTSPLLabel } from '@/services/tsplGenerator';
-import { generateESCPOSLabel, generateCode39SvgHtml, LabelSize } from '@/services/escposLabelGenerator';
+import { generateESCPOSLabel, generateBarcodeSvgHtml, LabelSize } from '@/services/escposLabelGenerator';
 import {
   LABEL_SIZE_CONFIGS,
   ORDERED_LABEL_SIZES,
@@ -231,16 +231,16 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             flex-shrink: 0;
           }
           .brand-title {
-            font-family: Georgia, "Times New Roman", Times, serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             font-weight: 900;
             font-size: ${cfg.brandFontSizePt}pt;
             line-height: 1;
-            letter-spacing: -0.2px;
+            letter-spacing: 0.1px;
             color: #000000;
           }
           .brand-tagline {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            font-weight: 400;
+            font-weight: 500;
             font-size: ${cfg.taglineFontSizePt}pt;
             line-height: 1;
             color: #000000;
@@ -256,8 +256,9 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             overflow: hidden;
             text-overflow: ellipsis;
             word-break: break-word;
+            text-transform: capitalize;
             max-width: 100%;
-            margin-top: 0.3mm;
+            margin-top: 0.25mm;
           }
           .price-big {
             font-size: ${cfg.priceFontSizePt}pt;
@@ -265,14 +266,14 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             line-height: 1;
             color: #000000;
-            letter-spacing: -0.3px;
+            letter-spacing: -0.2px;
             margin-top: 0.3mm;
           }
           .price-unit {
-            font-size: ${Math.max(4.5, Math.round(cfg.priceFontSizePt * 0.5))}pt;
+            font-size: ${Math.max(4.2, Math.round(cfg.priceFontSizePt * 0.52))}pt;
             font-weight: 700;
             color: #000000;
-            margin-left: 0.5mm;
+            margin-left: 0.4mm;
           }
           .barcode-box {
             width: 100%;
@@ -281,15 +282,16 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             align-items: center;
             justify-content: center;
             margin-top: auto;
+            margin-bottom: 0.1mm;
             flex-shrink: 0;
           }
           .barcode-text {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
+            font-family: "Courier New", Courier, monospace, sans-serif;
             font-size: ${cfg.barcodeFontSizePt}pt;
             font-weight: 700;
-            letter-spacing: 0.6px;
+            letter-spacing: 0.8px;
             line-height: 1;
-            margin-top: 0.15mm;
+            margin-top: 0.25mm;
             color: #000000;
           }
         </style>
@@ -317,7 +319,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
               <div class="price-big">Rs. ${formattedPrice}${measurementSuffix}</div>
             </div>
             <div class="barcode-box">
-              ${generateCode39SvgHtml(it.batchNumber, cfg.barcodeSvgHeight, cfg.barcodeMaxBarWidth)}
+              ${generateBarcodeSvgHtml(it.batchNumber, cfg.barcodeSvgHeight, 34)}
               <div class="barcode-text">${it.batchNumber}</div>
             </div>
           </div>
@@ -672,36 +674,15 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
               return (
                 <div className="w-full lg:w-[320px] shrink-0 bg-white rounded-2xl p-3.5 border border-stone-200 flex flex-col justify-between shadow-2xs">
                   <div>
-                    {/* Header with Title and Clean Size Selection */}
-                    <div className="flex flex-col gap-1.5 pb-2 mb-2 border-b border-stone-100">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
-                          <Eye className="w-3.5 h-3.5 text-stone-500" />
-                          <span>Sticker Preview</span>
-                        </span>
-                        <span className="text-[10px] font-mono font-bold text-stone-500">
-                          {cfg.name}
-                        </span>
-                      </div>
-
-                      {/* Clean Size Selection Row without heavy backgrounds */}
-                      <div className="grid grid-cols-6 gap-1 bg-stone-50 p-0.5 rounded-lg border border-stone-200">
-                        {ORDERED_LABEL_SIZES.map((sz) => (
-                          <button
-                            key={sz}
-                            type="button"
-                            onClick={() => setLabelSize(sz)}
-                            className={`text-[8.5px] font-mono font-bold py-1 text-center rounded transition-all cursor-pointer ${
-                              labelSize === sz
-                                ? 'bg-black text-white shadow-xs'
-                                : 'text-stone-600 hover:text-black hover:bg-stone-100'
-                            }`}
-                            title={LABEL_SIZE_CONFIGS[sz].name}
-                          >
-                            {sz.replace('x', '×')}
-                          </button>
-                        ))}
-                      </div>
+                    {/* Header with Title and Fixed 40x20 Standard Size Badge */}
+                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-stone-100">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+                        <Eye className="w-3.5 h-3.5 text-stone-500" />
+                        <span>Sticker Preview</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-stone-900 text-white font-mono text-[10px] font-bold tracking-tight shadow-2xs">
+                        40 × 20 mm
+                      </span>
                     </div>
 
                     {/* 100% Responsive Dimension Diagram Preview (No colored background) */}

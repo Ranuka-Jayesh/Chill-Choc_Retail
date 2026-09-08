@@ -1,0 +1,84 @@
+# ----------------------------------------------------------------------
+# Chill-Choc Retail POS - Apache / cPanel Configuration
+# ----------------------------------------------------------------------
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Prevent direct access to sensitive files
+  RewriteRule ^(\.git|\.env|package\.json|package-lock\.json|tsconfig.*\.json) - [F,L]
+
+  # 2. If the requested resource exists as a real file or directory, serve it directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 3. Single Page Application (SPA) Routing
+  # Route all other page requests to index.html so React Router handles navigation
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# ----------------------------------------------------------------------
+# MIME Types
+# ----------------------------------------------------------------------
+<IfModule mod_mime.c>
+  AddType application/javascript js mjs
+  AddType text/css css
+  AddType image/svg+xml svg svgz
+  AddType image/webp webp
+  AddType font/woff woff
+  AddType font/woff2 woff2
+  AddType application/json json
+</IfModule>
+
+# ----------------------------------------------------------------------
+# Browser Caching
+# ----------------------------------------------------------------------
+<IfModule mod_expires.c>
+  ExpiresActive On
+
+  # Default expiration: 1 hour
+  ExpiresDefault "access plus 1 hour"
+
+  # HTML: Never cache index.html so users always get updates immediately
+  ExpiresByType text/html "access plus 0 seconds"
+
+  # Assets with hashed filenames (immutable long-term caching)
+  ExpiresByType text/css "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType image/png "access plus 1 month"
+  ExpiresByType image/jpeg "access plus 1 month"
+  ExpiresByType image/webp "access plus 1 month"
+  ExpiresByType image/svg+xml "access plus 1 month"
+  ExpiresByType font/woff2 "access plus 1 year"
+  ExpiresByType font/woff "access plus 1 year"
+</IfModule>
+
+<IfModule mod_headers.c>
+  # Never cache index.html
+  <FilesMatch "^index\.html$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires 0
+  </FilesMatch>
+
+  # Cache hashed assets in /assets/ for 1 year
+  <FilesMatch "\.(js|css|woff2?|png|jpe?g|webp|svg)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+
+  # Security Headers
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ----------------------------------------------------------------------
+# Gzip / Deflate Compression
+# ----------------------------------------------------------------------
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css
+  AddOutputFilterByType DEFLATE application/javascript application/x-javascript application/json
+  AddOutputFilterByType DEFLATE image/svg+xml
+</IfModule>

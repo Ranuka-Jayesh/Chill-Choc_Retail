@@ -1,20 +1,13 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import { AdminUser } from '@/types';
+import { fetchOperatorsFromSupabase } from '@/services/supabaseData';
 
 interface AdminAuthContextType {
   isAdminLoggedIn: boolean;
   adminUser: AdminUser | null;
-  login: (username: string, password?: string) => boolean;
+  login: (username: string, password?: string) => Promise<boolean>;
   logout: () => void;
 }
-
-const DEFAULT_ADMIN: AdminUser = {
-  id: 'admin-01',
-  name: 'Chaminda Silva',
-  email: 'admin@chillandchoc.lk',
-  role: 'Super Admin',
-  avatarInitials: 'CS',
-};
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
@@ -30,82 +23,84 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
     try {
       const stored = localStorage.getItem('chill_admin_user');
-      return stored ? JSON.parse(stored) : DEFAULT_ADMIN;
+      return stored ? JSON.parse(stored) : null;
     } catch {
-      return DEFAULT_ADMIN;
+      return null;
     }
   });
 
-  const login = (username: string, password = ''): boolean => {
+  const login = async (username: string, password = ''): Promise<boolean> => {
     const cleanUser = username.trim().toLowerCase().replace(/^@/, '');
     const cleanPass = password.trim();
 
-    // 1. Check against registered operators in localStorage
+    const verifyOperatorList = (ops: any[]): boolean => {
+      const matched = ops.find((o: any) => {
+        const oEmail = (o.email || '').trim().toLowerCase();
+        const oHandle = (o.handle || '').trim().toLowerCase().replace(/^@/, '');
+        const oName = (o.name || '').trim().toLowerCase();
+        return (
+          (oEmail === cleanUser || oHandle === cleanUser || oName === cleanUser) &&
+          (o.role === 'ADMIN' || o.role === 'MANAGER')
+        );
+      });
+
+      if (matched) {
+        // If operator is blocked, deny login
+        if (matched.status === 'Blocked') {
+          return false;
+        }
+        // Validate password or pin
+        const passMatch =
+          (matched.password && matched.password === cleanPass) ||
+          (matched.password_hash && matched.password_hash === cleanPass) ||
+          matched.pin === cleanPass;
+
+        if (passMatch) {
+          const user: AdminUser = {
+            id: matched.id,
+            name: matched.name,
+            email: matched.email || (matched.role === 'ADMIN' ? 'admin@chillchoc.lk' : 'manager@chillchoc.lk'),
+            role: matched.role === 'ADMIN' ? 'Super Admin' : 'Store Manager',
+            avatarInitials: matched.name.slice(0, 2).toUpperCase(),
+          };
+          setIsAdminLoggedIn(true);
+          setAdminUser(user);
+          try {
+            localStorage.setItem('chill_admin_logged_in', 'true');
+            localStorage.setItem('chill_admin_user', JSON.stringify(user));
+          } catch {}
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // 1. Try local storage first
     try {
       const stored = localStorage.getItem('chill_choc_operators');
       if (stored) {
         const ops = JSON.parse(stored);
-        const matched = ops.find((o: any) => {
-          const oEmail = (o.email || '').trim().toLowerCase();
-          const oHandle = (o.handle || '').trim().toLowerCase().replace(/^@/, '');
-          const oName = (o.name || '').trim().toLowerCase();
-          return (
-            (oEmail === cleanUser || oHandle === cleanUser || oName === cleanUser) &&
-            (o.role === 'ADMIN' || o.role === 'MANAGER')
-          );
-        });
+        if (Array.isArray(ops) && verifyOperatorList(ops)) {
+          return true;
+        }
+      }
+    } catch {}
 
-        if (matched) {
-          // If operator is blocked, deny login
-          if (matched.status === 'Blocked') {
-            return false;
-          }
-          // Validate password or pin
-          const passMatch =
-            (matched.password && matched.password === cleanPass) ||
-            matched.pin === cleanPass ||
-            cleanPass === 'admin123' ||
-            cleanPass === 'admin';
-
-          if (passMatch) {
-            const user: AdminUser = {
-              id: matched.id,
-              name: matched.name,
-              email: matched.email || (matched.role === 'ADMIN' ? 'admin@chillandchoc.lk' : 'manager@chillchoc.lk'),
-              role: matched.role === 'ADMIN' ? 'Super Admin' : 'Store Manager',
-              avatarInitials: matched.name.slice(0, 2).toUpperCase(),
-            };
-            setIsAdminLoggedIn(true);
-            setAdminUser(user);
-            try {
-              localStorage.setItem('chill_admin_logged_in', 'true');
-              localStorage.setItem('chill_admin_user', JSON.stringify(user));
-            } catch {}
-            return true;
-          }
+    // 2. Fetch directly from Supabase cloud database
+    try {
+      const remoteOps = await fetchOperatorsFromSupabase();
+      if (Array.isArray(remoteOps) && remoteOps.length > 0) {
+        try {
+          localStorage.setItem('chill_choc_operators', JSON.stringify(remoteOps));
+        } catch {}
+        if (verifyOperatorList(remoteOps)) {
+          return true;
         }
       }
     } catch (e) {
-      console.warn('Error checking operator auth', e);
+      console.warn('Error checking cloud operator auth', e);
     }
 
-    // 2. Flexible demo authentication fallback
-    if (
-      (cleanUser === 'admin' && (cleanPass === 'admin123' || cleanPass === '1234' || cleanPass === 'admin')) ||
-      (cleanUser === 'manager' && (cleanPass === 'manager123' || cleanPass === '1234' || cleanPass === 'admin')) ||
-      cleanPass === '1234' ||
-      cleanPass === 'admin'
-    ) {
-      setIsAdminLoggedIn(true);
-      setAdminUser(DEFAULT_ADMIN);
-      try {
-        localStorage.setItem('chill_admin_logged_in', 'true');
-        localStorage.setItem('chill_admin_user', JSON.stringify(DEFAULT_ADMIN));
-      } catch (err) {
-        console.error('Failed to write admin auth to localStorage', err);
-      }
-      return true;
-    }
     return false;
   };
 

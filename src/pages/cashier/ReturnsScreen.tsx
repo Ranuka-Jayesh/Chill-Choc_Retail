@@ -106,7 +106,7 @@ export const ReturnsScreen: React.FC = () => {
       setReturnConfig(init);
     } else {
       setActiveSale(null);
-      showToast(`Invoice "${clean}" not found. Try INV-001827 or INV-001829`, 'error');
+      showToast(`Invoice "${clean}" not found in system sales history`, 'error');
     }
   };
 
@@ -331,7 +331,7 @@ export const ReturnsScreen: React.FC = () => {
                 value={invoiceQuery}
                 onChange={(e) => setInvoiceQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearchInvoice(invoiceQuery)}
-                placeholder="Scan or type invoice (e.g. INV-001827)..."
+                placeholder="Scan or type invoice (e.g. INV-000001)..."
                 className="w-full h-6 pl-7 pr-2 rounded border border-stone-200 bg-white text-[11px] font-mono font-bold text-zinc-900 placeholder:text-zinc-400 placeholder:font-sans placeholder:font-normal focus:outline-none focus:ring-1 focus:ring-[#FF5500]"
               />
             </div>

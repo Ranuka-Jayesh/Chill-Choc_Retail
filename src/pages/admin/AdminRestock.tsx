@@ -103,7 +103,7 @@ export const AdminRestock: React.FC = () => {
 
   // --- Goods Inward Studio Form State ---
   const [studioSupplierId, setStudioSupplierId] = useState<string>('');
-  const [invoiceRef, setInvoiceRef] = useState<string>('INV-5500');
+  const [invoiceRef, setInvoiceRef] = useState<string>('');
   const [deliveryNotes, setDeliveryNotes] = useState<string>('');
   const [isUnpaidCredit, setIsUnpaidCredit] = useState(false);
 
@@ -112,7 +112,7 @@ export const AdminRestock: React.FC = () => {
   const [cardAmount, setCardAmount] = useState<string>('0');
   const [chequeAmount, setChequeAmount] = useState<string>('0');
   const [chequeDueDate, setChequeDueDate] = useState<string>('');
-  const [chequeNumber, setChequeNumber] = useState<string>('CHQ-98402');
+  const [chequeNumber, setChequeNumber] = useState<string>('');
   const [unpaidDueDate, setUnpaidDueDate] = useState<string>('');
 
   // Line items state
@@ -143,15 +143,14 @@ export const AdminRestock: React.FC = () => {
 
   // Open Studio with fresh/clean state (no auto-selected supplier and no initial item records)
   const handleOpenStudio = () => {
-    const randomInv = Math.floor(1000 + Math.random() * 9000);
-    setInvoiceRef(`INV-${randomInv}`);
+    setInvoiceRef('');
     setDeliveryNotes('');
     setIsUnpaidCredit(false);
     setCashAmount('0');
     setCardAmount('0');
     setChequeAmount('0');
     setChequeDueDate('');
-    setChequeNumber(`CHQ-${Math.floor(10000 + Math.random() * 90000)}`);
+    setChequeNumber('');
     setUnpaidDueDate('');
     setLineItems([]);
     setStudioSupplierId('');
@@ -430,35 +429,11 @@ export const AdminRestock: React.FC = () => {
       if (p.batches?.some((b) => b.supplierId === studioSupplierId)) return true;
       // 3. Purchase order history match
       if (purchaseOrders.some((po) => po.supplierId === studioSupplierId && po.items.some((it) => it.productId === p.id))) return true;
-      // 4. Supplier brand / name heuristic match
+      // 4. Supplier brand / suppliedProductIds match
       const sup = suppliers.find((s) => s.id === studioSupplierId);
       if (sup) {
-        const sName = sup.name.toLowerCase();
-        const sCode = sup.code.toLowerCase();
-        const pBrand = (p.brand || '').toLowerCase();
-        const pName = p.name.toLowerCase();
-
-        if (sName.includes('nestle') || sName.includes('nestlé') || sCode.includes('nes')) {
-          return pBrand.includes('nestle') || pBrand.includes('nestlé') || pName.includes('kitkat') || pName.includes('san pellegrino');
-        }
-        if (sName.includes('mars') || sCode.includes('mars')) {
-          return pBrand.includes('mars') || pBrand.includes('wrigley') || pName.includes('snickers') || pName.includes('mars') || pName.includes('m&m') || pName.includes('twix') || pName.includes('bounty') || pName.includes('skittles');
-        }
-        if (sName.includes('mondelez') || sName.includes('mondelēz') || sCode.includes('mdz')) {
-          return pBrand.includes('mondelez') || pBrand.includes('cadbury') || pBrand.includes('nabisco') || pBrand.includes('milka') || pName.includes('toblerone') || pName.includes('oreo') || pName.includes('cadbury') || pName.includes('milka');
-        }
-        if (sName.includes('metro') || sCode.includes('metro')) {
-          return pBrand.includes('ferrero') || pBrand.includes('hershey') || pBrand.includes('lindt') || pName.includes('kinder') || pName.includes('nutella');
-        }
-        if (sName.includes('ceylon candy') || sCode.includes('cey')) {
-          return pBrand.includes('storck') || pName.includes('werther') || p.category === 'toffees';
-        }
-        if (sName.includes('bakers') || sCode.includes('cbs')) {
-          return pName.includes('ganache') || pName.includes('cotton') || pName.includes('candy cloud');
-        }
-        if (sName.includes('coffee') || sCode.includes('ccr')) {
-          return pName.includes('espresso') || pName.includes('coffee') || pName.includes('arabica');
-        }
+        if (sup.suppliedProductIds && sup.suppliedProductIds.includes(p.id)) return true;
+        if (sup.brand && p.brand && sup.brand.toLowerCase() === p.brand.toLowerCase()) return true;
       }
       return false;
     });

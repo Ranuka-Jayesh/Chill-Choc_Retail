@@ -35,16 +35,59 @@ const CODE39_PATTERNS: Record<string, string> = {
   '/': '010100010', '+': '010001010', '%': '000101010', '*': '010010100'
 };
 
+import JsBarcode from 'jsbarcode';
+
+/**
+ * Generate vector SVG string for Code 128 barcode (clean, scannable, un-compacted)
+ * Code 128 produces 40% fewer elements than Code 39, leaving wide, sharp white spaces
+ * that never smudge together on thermal print heads.
+ */
+export function generateBarcodeSvgHtml(
+  value: string,
+  height: number = 20,
+  maxBarWidthMm: number = 34
+): string {
+  const clean = (value || 'LOT-001').trim();
+  if (typeof document !== 'undefined') {
+    try {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      JsBarcode(svg, clean, {
+        format: 'CODE128',
+        width: 1.1,
+        height: height,
+        displayValue: false,
+        margin: 2,
+        background: '#ffffff',
+        lineColor: '#000000',
+      });
+      svg.setAttribute(
+        'style',
+        `width:100%;max-width:${maxBarWidthMm}mm;height:${height}px;display:block;margin:0 auto;`
+      );
+      svg.setAttribute('shape-rendering', 'crispEdges');
+      return new XMLSerializer().serializeToString(svg);
+    } catch (e) {
+      console.warn('JsBarcode Code 128 generation error, falling back:', e);
+    }
+  }
+
+  return generateRawCode39SvgHtml(clean, height, Math.round(maxBarWidthMm * 5.5));
+}
+
 /**
  * Generate vector SVG string for Code 39 barcode (suitable for HTML printing)
+ * Kept for backwards compatibility and fallback
  */
-export function generateCode39SvgHtml(value: string, height: number = 36, maxBarWidth: number = 240): string {
+export function generateCode39SvgHtml(value: string, height: number = 20, maxBarWidth: number = 180): string {
+  return generateBarcodeSvgHtml(value, height, Math.round(maxBarWidth * 0.18));
+}
+
+function generateRawCode39SvgHtml(value: string, height: number = 36, maxBarWidth: number = 240): string {
   const clean = sanitizeCode39(value);
   const fullText = `*${clean}*`;
   const charCount = fullText.length;
   const totalModules = charCount * 13.5 + (charCount - 1);
 
-  // Dynamically scale narrow module width to expand or contract with maxBarWidth
   let narrow = (maxBarWidth * 0.88) / totalModules;
   narrow = Math.min(1.85, Math.max(0.60, narrow));
   const wide = narrow * 2.5;
@@ -140,32 +183,28 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
   const FONT_BRAND = `${ESC}!\x18`;   // Font A double-height + bold (large brand title)
   const FONT_PRICE = `${ESC}!\x18`;   // Font A double-height + bold (prominent price)
 
-  // Dynamically calculate barcode module width so barcode is always compact and centered (~25-30mm wide)
-  // For Code 39, start/stop adds 2 characters
-  const code39Chars = cleanBarcode.length + 2;
-  // If w=2, width is code39Chars * 29 dots. If that exceeds 280 dots (~35mm), switch to w=1 (14.5 dots/char)
-  // This ensures LOT-KIT-040-53 (16 chars) prints at 232 dots (~29mm) instead of 464 dots (58mm)
-  const barcodeWidthHex = code39Chars * 29 > 280 ? '\x01' : '\x02';
+  // For Code 128, barcode module width is set to 2 dots (crisp, readable, fits comfortably in ~30mm)
+  const barcodeWidthHex = '\x02';
 
   // Substantial, easily scannable barcode heights matching preview proportions:
-  // 60 dots = 7.5mm (for 20mm labels) -> More than 2x taller than previous 30 dots (3.75mm)!
-  // 72 dots = 9.0mm (for 25mm labels)
-  // 84 dots = 10.5mm (for 30mm labels)
-  let barcodeHeightHex = '\x3C'; // 60 dots default (7.5 mm)
-  if (labelSize === '30x20') {
-    barcodeHeightHex = '\x34'; // 52 dots (6.5 mm)
-  } else if (labelSize === '40x20') {
-    barcodeHeightHex = '\x3C'; // 60 dots (7.5 mm)
+  // 48 dots = 6.0mm (for 20mm labels)
+  // 64 dots = 8.0mm (for 25mm labels)
+  // 80 dots = 10.0mm (for 30mm labels)
+  let barcodeHeightHex = '\x30'; // 48 dots default (6.0 mm)
+  if (labelSize === '30x20' || labelSize === '40x20') {
+    barcodeHeightHex = '\x30'; // 48 dots (6.0 mm)
   } else if (labelSize === '35x25' || labelSize === '40x25') {
-    barcodeHeightHex = '\x48'; // 72 dots (9.0 mm)
+    barcodeHeightHex = '\x40'; // 64 dots (8.0 mm)
   } else if (labelSize === '40x30' || labelSize === '50x30') {
-    barcodeHeightHex = '\x54'; // 84 dots (10.5 mm)
+    barcodeHeightHex = '\x50'; // 80 dots (10.0 mm)
   }
 
   const BARCODE_HEIGHT = `${GS}h${barcodeHeightHex}`;
   const BARCODE_WIDTH = `${GS}w${barcodeWidthHex}`;
   const BARCODE_HRI_OFF = `${GS}H\x00`; // Disable printer HRI asterisks
-  const BARCODE_PRINT = `${GS}k\x04${cleanBarcode}\x00`; // Code 39
+  // Standard GS k format 2 for Code 128 with Code Set B ({B)
+  const code128Data = `{B${cleanBarcode}`;
+  const BARCODE_PRINT = `${GS}k\x49${String.fromCharCode(code128Data.length)}${code128Data}`;
 
   const CMD_FEED = labelSize === '30x20' || labelSize === '40x20' ? `${ESC}d\x01` : `${ESC}d\x02`;
   const CMD_FEED_SEPARATION = `${ESC}d\x01`;
@@ -179,8 +218,8 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
     CMD_LINE_SPACING_RESET,
     // 1. Shop Name: Bold, largest brand text, horizontally centered
     `${FONT_BRAND}${storeName}${FONT_NORMAL}\n`,
-    // 2. Tagline: Much smaller than shop name, regular/medium (omitted on 30x20 for barcode safety)
-    ...(labelSize !== '30x20' ? [`${FONT_SMALL}${tagline}${FONT_NORMAL}\n`] : []),
+    // 2. Tagline: Much smaller than shop name, regular/medium (omitted on 20mm labels for barcode safety)
+    ...(labelSize !== '30x20' && labelSize !== '40x20' ? [`${FONT_SMALL}${tagline}${FONT_NORMAL}\n`] : []),
     // 3. Product Name: Bold font, centered, max 2 lines
     ...titleLines.map((line) => `${FONT_BOLD}${line}${FONT_NORMAL}\n`),
     // 4. Price: Very bold, large, prominent

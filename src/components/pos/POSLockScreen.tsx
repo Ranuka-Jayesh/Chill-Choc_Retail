@@ -27,20 +27,17 @@ export const POSLockScreen: React.FC = () => {
         e.preventDefault();
         e.stopPropagation();
         setError(false);
-        setPin((prev) => {
-          if (prev.length < 4) {
-            const next = prev + e.key;
-            if (next.length === 4) {
-              const success = unlockPOS(next);
-              if (!success) {
-                setError(true);
-                return '';
-              }
+        if (pin.length < 4) {
+          const next = pin + e.key;
+          setPin(next);
+          if (next.length === 4) {
+            const success = unlockPOS(next);
+            if (!success) {
+              setError(true);
+              setPin('');
             }
-            return next;
           }
-          return prev;
-        });
+        }
       } else if (e.key === 'Backspace') {
         e.preventDefault();
         e.stopPropagation();
@@ -49,16 +46,13 @@ export const POSLockScreen: React.FC = () => {
       } else if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
-        setPin((current) => {
-          if (current.length === 4) {
-            const success = unlockPOS(current);
-            if (!success) {
-              setError(true);
-              return '';
-            }
+        if (pin.length === 4) {
+          const success = unlockPOS(pin);
+          if (!success) {
+            setError(true);
+            setPin('');
           }
-          return current;
-        });
+        }
       } else {
         // Intercept navigation/shortcut keys while terminal is locked
         if (e.key.startsWith('F') || ['Tab', ' '].includes(e.key)) {
@@ -70,7 +64,7 @@ export const POSLockScreen: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isLocked, isBlockedByAdmin, unlockPOS]);
+  }, [isLocked, isBlockedByAdmin, pin, unlockPOS]);
 
   if (!isLocked || window.location.pathname.startsWith('/admin')) return null;
 

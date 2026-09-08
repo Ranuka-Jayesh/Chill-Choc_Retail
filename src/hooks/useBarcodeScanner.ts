@@ -94,6 +94,11 @@ export const useBarcodeScanner = ({
 
       // Printable single character keys
       if (e.key.length === 1) {
+        // Mark scanner activity timestamp on rapid input (<150ms)
+        if (interval > 0 && interval <= 150) {
+          (window as any).__lastBarcodeKeystroke = now;
+        }
+
         // If too much time elapsed between strokes (> 150ms), reset buffer
         if (interval > 150) {
           bufferRef.current = e.key;

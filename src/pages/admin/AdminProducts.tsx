@@ -5,6 +5,7 @@ import { useProducts, isProductExpired, isBatchExpired, getProductStockExpirySta
 import { useSuppliers } from '@/stores/supplierStore';
 import { useToast } from '@/stores/toastStore';
 import { Product, ProductBatch, ConfectionCategory } from '@/types';
+import { uploadProductImage } from '@/services/storageService';
 import { BatchListModal } from '@/components/admin/BatchListModal';
 import { ProductDetailsModal } from '@/components/admin/ProductDetailsModal';
 import { Modal } from '@/components/common/Modal';
@@ -118,11 +119,6 @@ export const CategoryIconComponent: React.FC<{ name?: string; className?: string
 
 const DEFAULT_CATEGORY_ITEMS: CategoryItem[] = [
   { id: 'all', name: 'All', icon: 'Layers' },
-  { id: 'chocolate', name: 'Chocolate', icon: 'Candy' },
-  { id: 'toffees', name: 'Toffees', icon: 'Sparkles' },
-  { id: 'biscuits', name: 'Biscuits', icon: 'Cookie' },
-  { id: 'drinks', name: 'Drinks', icon: 'CupSoda' },
-  { id: 'gifts', name: 'Gifts', icon: 'Gift' },
 ];
 
 const getStoredCategories = (): CategoryItem[] => {
@@ -384,19 +380,27 @@ export const AdminProducts: React.FC = () => {
     setEditPhotoData(prod.imageUrl || '');
   };
 
-  const handleEditImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleEditImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
       showToast('Image file must be under 5MB', 'error');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setEditPhotoData(reader.result as string);
-      showToast('Product photo updated', 'success');
-    };
-    reader.readAsDataURL(file);
+    try {
+      showToast('Uploading image to Supabase Storage...', 'info');
+      const publicUrl = await uploadProductImage(file);
+      setEditPhotoData(publicUrl);
+      showToast('Product photo uploaded to Supabase Storage!', 'success');
+    } catch (err: any) {
+      console.warn('Supabase storage fallback to local FileReader:', err);
+      const reader = new FileReader();
+      reader.onload = () => {
+        setEditPhotoData(reader.result as string);
+        showToast('Product photo attached locally (run storage.sql to enable cloud storage)', 'info');
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSaveEditProduct = (e: React.FormEvent) => {
@@ -429,19 +433,27 @@ export const AdminProducts: React.FC = () => {
     setProductToDelete(null);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
       showToast('Image file must be under 5MB', 'error');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setNewPhotoData(reader.result as string);
-      showToast('Product photo attached', 'success');
-    };
-    reader.readAsDataURL(file);
+    try {
+      showToast('Uploading image to Supabase Storage...', 'info');
+      const publicUrl = await uploadProductImage(file);
+      setNewPhotoData(publicUrl);
+      showToast('Product photo uploaded to Supabase Storage!', 'success');
+    } catch (err: any) {
+      console.warn('Supabase storage fallback to local FileReader:', err);
+      const reader = new FileReader();
+      reader.onload = () => {
+        setNewPhotoData(reader.result as string);
+        showToast('Product photo attached locally (run storage.sql to enable cloud storage)', 'info');
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   // Add Category Handler with Selected Icon

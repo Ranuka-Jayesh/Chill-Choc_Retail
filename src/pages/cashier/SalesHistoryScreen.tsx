@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSales } from '@/stores/salesStore';
 import { useToast } from '@/stores/toastStore';
 import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
-import { MOCK_PRODUCTS } from '@/data/mockProducts';
+import { useProducts } from '@/stores/productStore';
 import { CashierHeader } from '@/components/pos/CashierHeader';
 import { ReceiptPreviewModal } from '@/components/modals/ReceiptPreviewModal';
 import { AppFooter } from '@/components/common/AppFooter';
@@ -24,6 +24,7 @@ export const SalesHistoryScreen: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { sales, getSaleByInvoice } = useSales();
+  const { products } = useProducts();
   const { showToast } = useToast();
 
   const [search, setSearch] = useState('');
@@ -101,9 +102,9 @@ export const SalesHistoryScreen: React.FC = () => {
 
       // B. If a product barcode was scanned while on Sales History screen:
       const matchedProduct =
-        MOCK_PRODUCTS.find((p) => p.barcode === clean) ||
-        MOCK_PRODUCTS.find((p) => p.sku.toLowerCase() === clean.toLowerCase()) ||
-        MOCK_PRODUCTS.find((p) => p.name.toLowerCase() === clean.toLowerCase());
+        products.find((p) => p.barcode === clean) ||
+        products.find((p) => p.sku.toLowerCase() === clean.toLowerCase()) ||
+        products.find((p) => p.name.toLowerCase() === clean.toLowerCase());
 
       if (matchedProduct) {
         showToast(`Scanned ${matchedProduct.name}. Adding to bill...`, 'info');

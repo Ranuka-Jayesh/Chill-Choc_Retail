@@ -1,20 +1,45 @@
 import React, { useMemo } from 'react';
 import { LabelSize, LABEL_SIZE_CONFIGS, extractProductMeasurement } from '@/services/labelConfig';
 import { sanitizeCode39 } from '@/services/escposLabelGenerator';
+import JsBarcode from 'jsbarcode';
 
-const CODE39_PATTERNS: Record<string, string> = {
-  '0': '000110100', '1': '100100001', '2': '001100001', '3': '101100000',
-  '4': '000110001', '5': '100110000', '6': '001110000', '7': '000100101',
-  '8': '100100100', '9': '001100100', 'A': '100001001', 'B': '001001001',
-  'C': '101001000', 'D': '000011001', 'E': '100011000', 'F': '001011000',
-  'G': '000001101', 'H': '100001100', 'I': '001001100', 'J': '000011100',
-  'K': '100000011', 'L': '001000011', 'M': '101000010', 'N': '000010011',
-  'O': '100010010', 'P': '001010010', 'Q': '000000111', 'R': '100000110',
-  'S': '001000110', 'T': '000010110', 'U': '110000001', 'V': '011000001',
-  'W': '111000000', 'X': '010010001', 'Y': '110010000', 'Z': '011010000',
-  '-': '010000101', '.': '110000100', ' ': '011000100', '$': '010101000',
-  '/': '010100010', '+': '010001010', '%': '000101010', '*': '010010100'
-};
+function getCode128Bars(value: string, targetWidth: number): Array<{ x: number; width: number }> {
+  const clean = (value || 'LOT-001').trim();
+  if (typeof document !== 'undefined') {
+    try {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      JsBarcode(svg, clean, {
+        format: 'CODE128',
+        width: 1.0,
+        height: 24,
+        displayValue: false,
+        margin: 0,
+      });
+
+      const barGroup = svg.children[1] || svg.children[0];
+      if (barGroup && barGroup.children) {
+        let maxRight = 0;
+        const rawBars: Array<{ x: number; width: number }> = [];
+        for (let i = 0; i < barGroup.children.length; i++) {
+          const el = barGroup.children[i] as SVGElement;
+          const x = parseFloat(el.getAttribute('x') || '0');
+          const width = parseFloat(el.getAttribute('width') || '0');
+          rawBars.push({ x, width });
+          if (x + width > maxRight) maxRight = x + width;
+        }
+
+        const scale = targetWidth / (maxRight || 1);
+        return rawBars.map((b) => ({
+          x: b.x * scale,
+          width: b.width * scale,
+        }));
+      }
+    } catch (e) {
+      console.warn('Diagram barcode preview error', e);
+    }
+  }
+  return [];
+}
 
 function wrapProductTitle(text: string, maxPerLine: number = 24): string[] {
   const clean = text.trim();
@@ -156,42 +181,10 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
       barcodeTextY = barcodeY + barcodeHeight + 14;
     }
 
-    // Barcode calculation
-    const fullText = `*${cleanBarcode}*`;
-    const charCount = fullText.length;
-    const totalModules = charCount * 13.5 + (charCount - 1);
-    const maxBarWidth = stickerWidth - 28; // 14px quiet zone on each side
-
-    let narrow = (maxBarWidth * 0.88) / totalModules;
-    narrow = Math.min(1.85, Math.max(0.55, narrow));
-    const wide = narrow * 2.5;
-    const gap = narrow;
-
-    let totalBcWidth = 0;
-    for (let i = 0; i < fullText.length; i++) {
-      const pattern = CODE39_PATTERNS[fullText[i]] || CODE39_PATTERNS['-'];
-      for (let j = 0; j < 9; j++) {
-        totalBcWidth += pattern[j] === '1' ? wide : narrow;
-      }
-      if (i < fullText.length - 1) totalBcWidth += gap;
-    }
-
-    const startX = centerX - totalBcWidth / 2;
-    let currX = startX;
-    const rects: Array<{ x: number; width: number }> = [];
-
-    for (let i = 0; i < fullText.length; i++) {
-      const pattern = CODE39_PATTERNS[fullText[i]] || CODE39_PATTERNS['-'];
-      for (let j = 0; j < 9; j++) {
-        const isBar = j % 2 === 0;
-        const w = pattern[j] === '1' ? wide : narrow;
-        if (isBar) {
-          rects.push({ x: currX, width: w });
-        }
-        currX += w;
-      }
-      if (i < fullText.length - 1) currX += gap;
-    }
+    // Barcode calculation using crisp Code 128
+    const targetBcWidth = Math.min(stickerWidth - 36, 175);
+    const rects = getCode128Bars(cleanBarcode, targetBcWidth);
+    const startX = centerX - targetBcWidth / 2;
 
     return {
       stickerWidth,
@@ -217,6 +210,7 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
       barcodeY,
       barcodeHeight,
       barcodeTextY,
+      startX,
       rects,
     };
   }, [cfg, cleanTitle, cleanBarcode]);
@@ -287,16 +281,16 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
           strokeWidth="2"
         />
 
-        {/* 1. Shop Name: Bold Serif Font matching user design */}
+        {/* 1. Shop Name: Bold Font matching label design */}
         <text
           x={layout.centerX}
           y={layout.brandY}
           textAnchor="middle"
           fill="#000000"
-          fontFamily="Georgia, 'Times New Roman', Times, serif"
+          fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
           fontWeight="900"
-          fontSize={cfg.heightMm <= 20 ? "18" : "20"}
-          letterSpacing="-0.3px"
+          fontSize={cfg.heightMm <= 20 ? "17" : "19"}
+          letterSpacing="-0.2px"
         >
           {storeName}
         </text>
@@ -369,7 +363,7 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
         {layout.rects.map((bar, i) => (
           <rect
             key={i}
-            x={bar.x.toFixed(2)}
+            x={(layout.startX + bar.x).toFixed(2)}
             y={layout.barcodeY}
             width={bar.width.toFixed(2)}
             height={layout.barcodeHeight}

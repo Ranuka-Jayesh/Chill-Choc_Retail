@@ -37,6 +37,11 @@ export const usePosShortcuts = (handlers: ShortcutHandlers, enabled = true) => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const h = handlersRef.current;
 
+      // Ignore shortcut triggers while a hardware barcode scanner is streaming characters
+      if (typeof window !== 'undefined' && Date.now() - ((window as any).__lastBarcodeKeystroke || 0) < 150) {
+        return;
+      }
+
       // Ignore shortcut triggers if an input or textarea is currently focused,
       // EXCEPT for F1-F12 which are dedicated functional hotkeys, or + / - / Arrows when on empty search input
       const isInputFocused =
@@ -58,52 +63,30 @@ export const usePosShortcuts = (handlers: ShortcutHandlers, enabled = true) => {
       const isArrowUpKey = e.key === 'ArrowUp' && !e.ctrlKey && !e.metaKey && !e.altKey;
       const isArrowDownKey = e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey && !e.altKey;
 
-      // Handle Shift + L for Lock Terminal
-      const isShiftL =
-        e.shiftKey &&
+      // Handle Ctrl + Shift + L (or Ctrl + Alt + L) for Lock Terminal - safe modifier combo that never conflicts with barcodes
+      const isLockCombo =
+        (e.ctrlKey && (e.shiftKey || e.altKey)) &&
         (e.key === 'L' || e.key === 'l' || e.code === 'KeyL') &&
-        !e.ctrlKey &&
-        !e.altKey &&
         !e.metaKey;
 
-      if (isShiftL) {
-        const activeEl = document.activeElement;
-        const isSearchInput =
-          activeEl instanceof HTMLInputElement &&
-          activeEl.id === 'pos-search-input';
-        const isOtherInput =
-          (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) &&
-          !isSearchInput;
-
-        if (!isOtherInput && (!isSearchInput || activeEl.value.trim().length === 0)) {
-          e.preventDefault();
-          h.onLockTerminal?.();
-          return;
-        }
+      if (isLockCombo) {
+        e.preventDefault();
+        h.onLockTerminal?.();
+        return;
       }
 
-      // Handle Shift + C for Cart Clear
-      const isShiftC =
+      // Handle Ctrl + Shift + C for Cart Clear - safe modifier combo that never conflicts with barcodes
+      const isClearCombo =
+        e.ctrlKey &&
         e.shiftKey &&
         (e.key === 'C' || e.key === 'c' || e.code === 'KeyC') &&
-        !e.ctrlKey &&
         !e.altKey &&
         !e.metaKey;
 
-      if (isShiftC) {
-        const activeEl = document.activeElement;
-        const isSearchInput =
-          activeEl instanceof HTMLInputElement &&
-          activeEl.id === 'pos-search-input';
-        const isOtherInput =
-          (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) &&
-          !isSearchInput;
-
-        if (!isOtherInput && (!isSearchInput || activeEl.value.trim().length === 0)) {
-          e.preventDefault();
-          h.onClearCart?.();
-          return;
-        }
+      if (isClearCombo) {
+        e.preventDefault();
+        h.onClearCart?.();
+        return;
       }
 
       // Handle @ symbol (Shift + 2) for Salesperson / Team Member

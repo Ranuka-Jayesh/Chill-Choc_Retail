@@ -1,6 +1,5 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { HeldBill, CartItem, Customer } from '@/types';
-import { INITIAL_HELD_BILLS } from '@/data/mockHeldBills';
 
 interface HeldBillsContextType {
   heldBills: HeldBill[];
@@ -9,13 +8,30 @@ interface HeldBillsContextType {
   getHeldBill: (id: string) => HeldBill | undefined;
 }
 
+const STORAGE_KEY = 'pos_held_bills';
+
 const HeldBillsContext = createContext<HeldBillsContextType | undefined>(undefined);
 
 export const HeldBillsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [heldBills, setHeldBills] = useState<HeldBill[]>(INITIAL_HELD_BILLS);
+  const [heldBills, setHeldBills] = useState<HeldBill[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(heldBills));
+    } catch {}
+  }, [heldBills]);
 
   const holdBill = (items: CartItem[], total: number, customer?: Customer, note?: string) => {
-    const holdNumber = heldBills.length + 19;
+    const holdNumber = heldBills.length + 1;
     const holdCode = `HOLD-${String(holdNumber).padStart(4, '0')}`;
     const itemsCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -26,7 +42,7 @@ export const HeldBillsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       items: [...items],
       itemsCount,
       total,
-      cashier: 'Nimal Perera',
+      cashier: 'Cashier',
       customer,
       note,
     };

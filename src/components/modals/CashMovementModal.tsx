@@ -220,6 +220,7 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({ isOpen, on
       type: selectedType,
       amount: num,
       reason: reason.trim(),
+      date: selectedDate.toISOString().split('T')[0],
     });
 
     showToast(`Manager authorized: Recorded ${selectedType} (Rs. ${num.toLocaleString()})`, 'success');

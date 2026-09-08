@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { MOCK_SALESPERSONS } from '@/data/mockEmployees';
+import { useStaff } from '@/stores/staffStore';
 import { Salesperson } from '@/types';
 import { Search, Check, UserCheck, X } from 'lucide-react';
 
@@ -22,10 +22,60 @@ export const SalespersonModal: React.FC<SalespersonModalProps> = ({
   onSelectSalesperson,
   productName,
 }) => {
+  const { staffList } = useStaff();
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Build real salespersons dynamically from active staff members (EXCLUDING Admins and Cashiers)
+  const realSalespersons = useMemo<Salesperson[]>(() => {
+    const list: Salesperson[] = [];
+
+    staffList
+      .filter((s) => s.status === 'Active')
+      .forEach((s) => {
+        const roleLower = (s.role || '').toLowerCase().trim();
+        const nameLower = (s.name || '').toLowerCase().trim();
+
+        // STRICT REQUIREMENT: Do NOT show Admin or Super Admin as salesperson
+        if (
+          roleLower.includes('admin') ||
+          nameLower.includes('admin') ||
+          roleLower.includes('super admin')
+        ) {
+          return;
+        }
+
+        // STRICT REQUIREMENT: Do NOT show Cashier as salesperson
+        if (
+          roleLower.includes('cashier') ||
+          nameLower.includes('cashier') ||
+          roleLower.includes('barista')
+        ) {
+          return;
+        }
+
+        // Determine a clean code badge
+        let code = 'SALES';
+        if (roleLower.includes('rep')) {
+          code = 'REP';
+        } else if (roleLower.includes('lead')) {
+          code = 'LEAD';
+        } else if (s.role) {
+          code = s.role.replace(/[^a-zA-Z]/g, '').slice(0, 5).toUpperCase() || 'SALES';
+        }
+
+        list.push({
+          id: s.id,
+          name: s.name,
+          code,
+          avatarInitials: s.name.slice(0, 2).toUpperCase(),
+        });
+      });
+
+    return list;
+  }, [staffList]);
 
   // Construct options: No Salesperson + filtered employees
   const options = useMemo<SalespersonOption[]>(() => {
@@ -38,7 +88,7 @@ export const SalespersonModal: React.FC<SalespersonModalProps> = ({
     };
 
     const query = search.trim().toLowerCase().replace(/^@/, '');
-    const filteredEmployees: SalespersonOption[] = MOCK_SALESPERSONS.filter((sp) => {
+    const filteredEmployees: SalespersonOption[] = realSalespersons.filter((sp) => {
       if (!query) return true;
       return (
         sp.name.toLowerCase().includes(query) ||
@@ -48,7 +98,7 @@ export const SalespersonModal: React.FC<SalespersonModalProps> = ({
     });
 
     return [noneOption, ...filteredEmployees];
-  }, [search]);
+  }, [search, realSalespersons]);
 
   // When opened, focus search and select initial item
   useEffect(() => {
@@ -257,6 +307,15 @@ export const SalespersonModal: React.FC<SalespersonModalProps> = ({
                   </button>
                 );
               })
+            )}
+
+            {realSalespersons.length === 0 && !search && (
+              <div className="py-3 px-2 text-center text-zinc-400 border-t border-zinc-100/60 mt-1">
+                <p className="text-[11px] font-bold text-zinc-600">No Sales Staff Registered</p>
+                <p className="text-[9.5px] text-zinc-400 mt-0.5">
+                  Add Sales Representatives in Admin &gt; Staff Management.
+                </p>
+              </div>
             )}
           </div>
 

@@ -94,23 +94,12 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
 
   if (heightMm <= 20) {
     const wrapped = wrapTitle(cleanTitle, widthMm >= 40 ? 24 : 18);
-    if (labelSize === '30x20') {
-      // 30x20: Tagline hidden for barcode safety
-      lines.push(`TEXT ${centerX}, 4, "2", 0, 1, 1, 2, "${storeName}"`);
-      lines.push(`TEXT ${centerX}, 24, "2", 0, 1, 1, 2, "${wrapped[0] || cleanTitle}"`);
-      lines.push(`TEXT ${centerX}, 46, "3", 0, 1, 1, 2, "${priceDisplay}"`);
-      if (cleanBarcode) {
-        lines.push(`BARCODE ${barcodeStartX}, 72, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
-      }
-    } else {
-      // 40x20: Primary compact layout with shop name, tagline, product name, price, barcode
-      lines.push(`TEXT ${centerX}, 2, "2", 0, 1, 1, 2, "${storeName}"`);
-      lines.push(`TEXT ${centerX}, 20, "1", 0, 1, 1, 2, "${tagline}"`);
-      lines.push(`TEXT ${centerX}, 34, "2", 0, 1, 1, 2, "${wrapped[0] || cleanTitle}"`);
-      lines.push(`TEXT ${centerX}, 54, "3", 0, 1, 1, 2, "${priceDisplay}"`);
-      if (cleanBarcode) {
-        lines.push(`BARCODE ${barcodeStartX}, 78, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
-      }
+    // 20mm labels: Tagline omitted for clear spacing and reliable barcode scanning
+    lines.push(`TEXT ${centerX}, 4, "2", 0, 1, 1, 2, "${storeName}"`);
+    lines.push(`TEXT ${centerX}, 26, "2", 0, 1, 1, 2, "${wrapped[0] || cleanTitle}"`);
+    lines.push(`TEXT ${centerX}, 48, "3", 0, 1, 1, 2, "${priceDisplay}"`);
+    if (cleanBarcode) {
+      lines.push(`BARCODE ${barcodeStartX}, 74, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
     }
   } else if (heightMm <= 25) {
     // 35x25 & 40x25

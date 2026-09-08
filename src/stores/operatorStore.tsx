@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { OperatorCredential, OperatorRole } from '@/types';
 import { operatorSyncSocket, OperatorSyncMessage } from '@/services/operatorSyncSocket';
+import {
+  fetchOperatorsFromSupabase,
+  insertOperatorToSupabase,
+  updateOperatorInSupabase,
+  deleteOperatorFromSupabase,
+  generateUUID,
+} from '@/services/supabaseData';
 
 interface OperatorContextType {
   operators: OperatorCredential[];
@@ -16,46 +23,7 @@ interface OperatorContextType {
 
 const STORAGE_KEY = 'chill_choc_operators';
 
-export const DEFAULT_OPERATORS: OperatorCredential[] = [
-  {
-    id: 'op-admin-1',
-    name: 'Chaminda Silva',
-    handle: '@admin',
-    email: 'admin@chillandchoc.lk',
-    password: 'admin123',
-    role: 'ADMIN',
-    pin: '1234',
-    status: 'Active',
-    avatarColor: 'teal',
-    createdAt: '2026-08-01T08:00:00.000Z',
-    notes: 'Super Administrator & Store Owner',
-  },
-  {
-    id: 'op-cashier-1',
-    name: 'Nimal Perera',
-    handle: '@cashier',
-    email: 'cashier.colombo@chillchoc.lk',
-    role: 'CASHIER',
-    pin: '2580',
-    status: 'Active',
-    avatarColor: 'gold',
-    createdAt: '2026-08-10T09:15:00.000Z',
-    notes: 'Primary POS Terminal Cashier • Register 01',
-  },
-  {
-    id: 'op-manager-1',
-    name: 'Kasun Fernando',
-    handle: '@manager',
-    email: 'manager.colombo@chillchoc.lk',
-    password: 'manager123',
-    role: 'MANAGER',
-    pin: '4321',
-    status: 'Active',
-    avatarColor: 'indigo',
-    createdAt: '2026-08-05T10:30:00.000Z',
-    notes: 'Shift Supervisor & Inventory Controller',
-  },
-];
+export const DEFAULT_OPERATORS: OperatorCredential[] = [];
 
 const OperatorContext = createContext<OperatorContextType | undefined>(undefined);
 
@@ -66,16 +34,7 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Ensure admin & manager have passwords populated
-          return parsed.map((op: OperatorCredential) => {
-            if (op.role === 'ADMIN' && !op.password) {
-              return { ...op, password: 'admin123', email: op.email || 'admin@chillandchoc.lk' };
-            }
-            if (op.role === 'MANAGER' && !op.password) {
-              return { ...op, password: 'manager123', email: op.email || 'manager.colombo@chillchoc.lk' };
-            }
-            return op;
-          });
+          return parsed;
         }
       }
     } catch (e) {
@@ -95,6 +54,20 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.warn('Error saving operators to localStorage', err);
     }
   };
+
+  // Fetch initial operators from Supabase cloud database
+  useEffect(() => {
+    let isMounted = true;
+    fetchOperatorsFromSupabase().then((data) => {
+      if (isMounted && Array.isArray(data) && data.length > 0) {
+        setOperators(data);
+        persistOperators(data);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Setup WebSocket listeners and cross-tab storage sync
   useEffect(() => {
@@ -166,7 +139,6 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const addOperator = (data: Omit<OperatorCredential, 'id' | 'createdAt'>): OperatorCredential => {
-    // Determine color based on role if not provided
     let defaultColor: OperatorCredential['avatarColor'] = 'slate';
     if (data.role === 'ADMIN') defaultColor = 'teal';
     else if (data.role === 'CASHIER') defaultColor = 'gold';
@@ -174,7 +146,7 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const newOperator: OperatorCredential = {
       ...data,
-      id: `op-${data.role.toLowerCase()}-${Date.now()}`,
+      id: generateUUID(),
       createdAt: new Date().toISOString(),
       avatarColor: data.avatarColor || defaultColor,
       handle: data.handle.startsWith('@') ? data.handle : `@${data.handle}`,
@@ -183,6 +155,9 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const updated = [...operators, newOperator];
     setOperators(updated);
     persistOperators(updated);
+
+    // Sync to Supabase cloud
+    insertOperatorToSupabase(newOperator);
 
     operatorSyncSocket.send({
       type: 'OPERATOR_CREATED',
@@ -210,6 +185,9 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setOperators(updated);
     persistOperators(updated);
 
+    // Sync to Supabase cloud
+    updateOperatorInSupabase(id, cleanUpdates);
+
     if (changedOp) {
       operatorSyncSocket.send({
         type: 'OPERATOR_UPDATED',
@@ -222,6 +200,9 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const updated = operators.filter((op) => op.id !== id);
     setOperators(updated);
     persistOperators(updated);
+
+    // Sync to Supabase cloud
+    deleteOperatorFromSupabase(id);
 
     operatorSyncSocket.send({
       type: 'OPERATOR_DELETED',
@@ -244,6 +225,9 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     persistOperators(updated);
 
     if (targetOp) {
+      // Sync to Supabase cloud
+      updateOperatorInSupabase(id, { status: targetOp.status });
+
       operatorSyncSocket.send({
         type: 'OPERATOR_STATUS_CHANGED',
         payload: {

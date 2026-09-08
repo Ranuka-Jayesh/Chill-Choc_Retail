@@ -1,7 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { CompletedSale, CartItem, Customer, PaymentTender, Salesperson } from '@/types';
-import { INITIAL_SALES } from '@/data/mockSales';
 import { useCashier } from './cashierStore';
+import {
+  fetchSalesFromSupabase,
+  insertSaleToSupabase,
+  generateUUID,
+} from '@/services/supabaseData';
 
 interface SalesContextType {
   sales: CompletedSale[];
@@ -40,7 +44,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch (e) {
       console.error('Failed to load sales from localStorage', e);
     }
-    return INITIAL_SALES;
+    return [];
   });
   const [lastCompletedSale, setLastCompletedSale] = useState<CompletedSale | null>(() => sales[0] || null);
 
@@ -51,6 +55,22 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.error('Failed to save sales to localStorage', e);
     }
   }, [sales]);
+
+  // Fetch initial sales from Supabase
+  useEffect(() => {
+    let isMounted = true;
+    fetchSalesFromSupabase().then((data) => {
+      if (isMounted && Array.isArray(data) && data.length > 0) {
+        setSales(data);
+        if (!lastCompletedSale) {
+          setLastCompletedSale(data[0] || null);
+        }
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const completeSale = ({
     items,
@@ -75,7 +95,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     cashierName: string;
     salesperson?: Salesperson | null;
   }) => {
-    const nextInvoiceNum = sales.length + 1830;
+    const nextInvoiceNum = sales.length + 1001;
     const invoiceNumber = `INV-${String(nextInvoiceNum).padStart(6, '0')}`;
 
     const effectiveItems = items.map((item) => ({
@@ -84,7 +104,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
 
     const newSale: CompletedSale = {
-      id: `sale-${Date.now()}`,
+      id: generateUUID(),
       invoiceNumber,
       timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       date: 'Today',
@@ -103,6 +123,9 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setSales((prev) => [newSale, ...prev]);
     setLastCompletedSale(newSale);
+
+    // Sync to Supabase cloud
+    insertSaleToSupabase(newSale);
 
     // Tally cash in drawer if sale was paid with cash
     const cashTenders = tenders.filter(

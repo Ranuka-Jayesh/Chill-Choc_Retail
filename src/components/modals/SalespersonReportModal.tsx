@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { MOCK_SALESPERSONS } from '@/data/mockEmployees';
+import { useStaff } from '@/stores/staffStore';
 import { useSales } from '@/stores/salesStore';
+import { Salesperson } from '@/types';
 import {
   Trophy,
   Calendar as CalendarIcon,
@@ -26,6 +27,7 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
   onClose,
 }) => {
   const { sales } = useSales();
+  const { staffList } = useStaff();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
@@ -141,6 +143,46 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
     return saleDateStr.startsWith(isoPrefix);
   };
 
+  // Build dynamic real salespersons list (EXCLUDING Admins and Cashiers)
+  const realSalespersons = useMemo<Salesperson[]>(() => {
+    const list: Salesperson[] = [];
+    staffList
+      .filter((s) => s.status === 'Active')
+      .forEach((s) => {
+        const roleLower = (s.role || '').toLowerCase().trim();
+        const nameLower = (s.name || '').toLowerCase().trim();
+
+        // STRICT REQUIREMENT: Do NOT show Admin or Cashier as salesperson
+        if (
+          roleLower.includes('admin') ||
+          nameLower.includes('admin') ||
+          roleLower.includes('super admin') ||
+          roleLower.includes('cashier') ||
+          nameLower.includes('cashier') ||
+          roleLower.includes('barista')
+        ) {
+          return;
+        }
+
+        let code = 'SALES';
+        if (roleLower.includes('rep')) {
+          code = 'REP';
+        } else if (roleLower.includes('lead')) {
+          code = 'LEAD';
+        } else if (s.role) {
+          code = s.role.replace(/[^a-zA-Z]/g, '').slice(0, 5).toUpperCase() || 'SALES';
+        }
+
+        list.push({
+          id: s.id,
+          name: s.name,
+          code,
+          avatarInitials: s.name.slice(0, 2).toUpperCase(),
+        });
+      });
+    return list;
+  }, [staffList]);
+
   // Aggregate sales per salesperson for the selected date dynamically from salesStore
   const reportData = useMemo(() => {
     // 1. Filter completed sales for selected date
@@ -155,7 +197,7 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
     > = {};
     const spBills: Record<string, Set<string>> = {};
 
-    MOCK_SALESPERSONS.forEach((sp) => {
+    realSalespersons.forEach((sp) => {
       spStats[sp.id] = { totalSales: 0, billCount: 0, itemCount: 0 };
       spBills[sp.id] = new Set();
     });
@@ -188,12 +230,12 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
     });
 
     // Populate billCount
-    MOCK_SALESPERSONS.forEach((sp) => {
+    realSalespersons.forEach((sp) => {
       spStats[sp.id].billCount = spBills[sp.id].size;
     });
 
     // Build sorted list
-    const list = MOCK_SALESPERSONS.map((sp) => {
+    const list = realSalespersons.map((sp) => {
       const stats = spStats[sp.id];
       return {
         ...sp,
@@ -219,7 +261,7 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
       totalItems,
       topPerformer: totalTeamSales > 0 ? list[0] : null,
     };
-  }, [selectedDate, sales]);
+  }, [selectedDate, sales, realSalespersons]);
 
   // Filter list by search query
   const filteredSalespersons = useMemo(() => {
