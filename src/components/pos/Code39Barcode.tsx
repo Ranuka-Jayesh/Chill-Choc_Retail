@@ -25,6 +25,8 @@ export interface Code39BarcodeProps {
   value: string;
   /** Height in pixels (default: 36px / ~9.5mm for reliable laser/CCD scanning) */
   height?: number;
+  /** Maximum bar width in pixels (default: 200) */
+  maxBarWidth?: number;
   /** Whether to show human-readable text underneath */
   showText?: boolean;
   /** Additional CSS class names */
@@ -34,6 +36,7 @@ export interface Code39BarcodeProps {
 export const Code39Barcode: React.FC<Code39BarcodeProps> = ({
   value,
   height = 36,
+  maxBarWidth = 260,
   showText = true,
   className = '',
 }) => {
@@ -56,16 +59,14 @@ export const Code39Barcode: React.FC<Code39BarcodeProps> = ({
     // Standard wide-to-narrow ratio is 2.5:1
     // Each character is 3 wide + 6 narrow modules + 1 narrow intercharacter gap = 14.5 modules
     const totalModules = charCount * 13.5 + (charCount - 1);
-    const maxBarWidth = 200; // Safe barcode width inside 64mm thermal receipt (59mm total)
 
-    let narrow = 1.15;
-    if (totalModules * narrow > maxBarWidth) {
-      narrow = maxBarWidth / totalModules;
-    }
+    // Dynamically scale narrow module width to expand or contract with maxBarWidth
+    let narrow = (maxBarWidth * 0.94) / totalModules;
+    narrow = Math.min(2.2, Math.max(0.60, narrow));
     const wide = narrow * 2.5;
     const gap = narrow;
-    // Quiet zone at least 10x narrow bar width
-    const quietZone = Math.max(12, narrow * 10);
+    // Quiet zone at least 10x narrow bar width for laser/CCD scanner readability
+    const quietZone = Math.max(8, narrow * 10);
 
     const rects: Array<{ x: number; width: number }> = [];
     let currentX = quietZone;
@@ -95,7 +96,7 @@ export const Code39Barcode: React.FC<Code39BarcodeProps> = ({
       totalWidth,
       height,
     };
-  }, [cleanValue, height]);
+  }, [cleanValue, height, maxBarWidth]);
 
   return (
     <div className={`flex flex-col items-center justify-center ${className}`}>
@@ -103,8 +104,8 @@ export const Code39Barcode: React.FC<Code39BarcodeProps> = ({
       <svg
         viewBox={`0 0 ${barcodeData.totalWidth} ${barcodeData.height}`}
         style={{
-          width: `${barcodeData.totalWidth}px`,
-          maxWidth: '100%',
+          width: '100%',
+          maxWidth: `${Math.min(maxBarWidth, barcodeData.totalWidth)}px`,
           height: `${barcodeData.height}px`,
           display: 'block',
         }}

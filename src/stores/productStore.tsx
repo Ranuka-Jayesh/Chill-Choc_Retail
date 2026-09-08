@@ -3,7 +3,7 @@ import { Product, ProductBatch, ConfectionCategory } from '@/types';
 import { MOCK_PRODUCTS } from '@/data/mockProducts';
 import { productSyncSocket } from '@/services/productSyncSocket';
 
-interface RestockParams {
+export interface RestockParams {
   productId: string;
   supplierId: string;
   supplierName: string;
@@ -36,12 +36,25 @@ export interface AddProductInput {
   isAvailable?: boolean;
 }
 
+export interface StockDeductionItem {
+  productId: string;
+  quantity: number;
+  batchAllocations?: Array<{
+    batchId?: string;
+    batchNumber?: string;
+    supplierId?: string;
+    quantity: number;
+  }>;
+}
+
 interface ProductContextType {
   products: Product[];
   addProduct: (productData: AddProductInput) => Product;
   updateProduct: (id: string, updates: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
   restockProduct: (params: RestockParams) => ProductBatch;
+  restockProducts: (paramsList: RestockParams[]) => ProductBatch[];
+  deductStock: (deductions: StockDeductionItem[]) => void;
   getProductById: (id: string) => Product | undefined;
   getBatchesForProduct: (productId: string) => ProductBatch[];
 }
@@ -60,8 +73,21 @@ const INITIAL_PRODUCTS_WITH_BATCHES: Product[] = MOCK_PRODUCTS.map((prod) => {
         sellingPrice: 450,
         receivedDate: '01 Aug 2026',
         expiryDate: '20 Aug 2026',
-        quantityReceived: 20,
-        quantityRemaining: 12,
+        quantityReceived: 10,
+        quantityRemaining: 3,
+      },
+      {
+        id: 'batch-kit-1b',
+        productId: prod.id,
+        supplierId: 'sup-nestle',
+        supplierName: 'Nestlé Lanka PLC',
+        batchNumber: 'LOT-NES-402',
+        costPrice: 365,
+        sellingPrice: 450,
+        receivedDate: '12 Aug 2026',
+        expiryDate: '15 Dec 2026',
+        quantityReceived: 15,
+        quantityRemaining: 9,
       },
       {
         id: 'batch-kit-2',
@@ -97,8 +123,21 @@ const INITIAL_PRODUCTS_WITH_BATCHES: Product[] = MOCK_PRODUCTS.map((prod) => {
         sellingPrice: 500,
         receivedDate: '10 Aug 2026',
         expiryDate: '10 Nov 2026',
-        quantityReceived: 15,
-        quantityRemaining: 12,
+        quantityReceived: 10,
+        quantityRemaining: 4,
+      },
+      {
+        id: 'batch-snk-1b',
+        productId: prod.id,
+        supplierId: 'sup-mars',
+        supplierName: 'Mars Global Foods Importers',
+        batchNumber: 'LOT-MARS-082',
+        costPrice: 405,
+        sellingPrice: 500,
+        receivedDate: '18 Aug 2026',
+        expiryDate: '28 Feb 2027',
+        quantityReceived: 10,
+        quantityRemaining: 8,
       },
       {
         id: 'batch-snk-2',
@@ -134,13 +173,26 @@ const INITIAL_PRODUCTS_WITH_BATCHES: Product[] = MOCK_PRODUCTS.map((prod) => {
         sellingPrice: 1200,
         receivedDate: '15 Aug 2026',
         expiryDate: '15 Mar 2027',
-        quantityReceived: 12,
-        quantityRemaining: 12,
+        quantityReceived: 6,
+        quantityRemaining: 4,
+      },
+      {
+        id: 'batch-tob-2',
+        productId: prod.id,
+        supplierId: 'sup-mondelez',
+        supplierName: 'Mondelēz International Distributors',
+        batchNumber: 'LOT-MDZ-103',
+        costPrice: 960,
+        sellingPrice: 1200,
+        receivedDate: '25 Aug 2026',
+        expiryDate: '20 Jun 2027',
+        quantityReceived: 10,
+        quantityRemaining: 8,
       },
     ];
     return {
       ...prod,
-      costPrice: 950,
+      costPrice: 955,
       batches,
       stock: 12,
     };
@@ -193,9 +245,28 @@ const INITIAL_PRODUCTS_WITH_BATCHES: Product[] = MOCK_PRODUCTS.map((prod) => {
   };
 });
 
+export const formatBatchDate = (d: Date = new Date()): string => {
+  const day = String(d.getDate()).padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${day} ${months[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+export const normalizeExpiryDate = (raw?: string): string => {
+  if (!raw || raw.trim() === '' || raw.toUpperCase() === 'N/A') return 'N/A';
+  const clean = raw.replace(/\s+/g, ' ').replace(/\s*\/\s*/g, '/').trim();
+  const parsed = new Date(clean);
+  if (!isNaN(parsed.getTime())) {
+    const day = String(parsed.getDate()).padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${day} ${months[parsed.getMonth()]} ${parsed.getFullYear()}`;
+  }
+  return raw;
+};
+
 export const isBatchExpired = (dateStr?: string): boolean => {
   if (!dateStr || dateStr.trim() === '' || dateStr.toUpperCase() === 'N/A') return false;
-  const exp = new Date(dateStr);
+  const cleanStr = dateStr.replace(/\s+/g, ' ').replace(/\s*\/\s*/g, '/').trim();
+  const exp = new Date(cleanStr);
   if (isNaN(exp.getTime())) return false;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -311,22 +382,27 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            const kitkat = parsed.find((p: Product) => p.id === 'prod-kitkat' || p.sku === 'CC-KIT-040');
-            if (kitkat && kitkat.batches && kitkat.batches.length >= 2) {
-              kitkat.batches[0].expiryDate = '20 Aug 2026';
-              kitkat.batches[0].quantityRemaining = 12;
-              kitkat.batches[1].expiryDate = '20 Jan 2027';
-              kitkat.batches[1].quantityRemaining = 13;
-              kitkat.stock = 25;
-            }
-            const cotton = parsed.find((p: Product) => p.id === 'prod-cotton-candy' || p.sku === 'CC-COT-050');
-            if (cotton && cotton.batches && cotton.batches[0]) {
-              cotton.batches[0].expiryDate = '25 Aug 2026';
-              cotton.batches[0].quantityRemaining = 12;
-              cotton.expiryDate = '25 Aug 2026';
-              cotton.stock = 12;
-            }
-            return parsed;
+            return parsed.map((prod: Product) => {
+              const initProd = INITIAL_PRODUCTS_WITH_BATCHES.find((p) => p.id === prod.id);
+              if (
+                initProd &&
+                initProd.batches &&
+                (!prod.batches || prod.batches.length < initProd.batches.length)
+              ) {
+                return initProd;
+              }
+              if (Array.isArray(prod.batches) && prod.batches.length > 0) {
+                const totalBatchStock = prod.batches.reduce(
+                  (sum, b) => sum + (typeof b.quantityRemaining === 'number' ? b.quantityRemaining : 0),
+                  0
+                );
+                return {
+                  ...prod,
+                  stock: totalBatchStock,
+                };
+              }
+              return prod;
+            });
           }
         }
       } catch (err) {
@@ -434,8 +510,8 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
         batchNumber: productData.batchNumber || `LOT-${Date.now().toString().slice(-4)}`,
         costPrice: productData.initialCost || 0,
         sellingPrice: productData.price || 0,
-        receivedDate: 'Today',
-        expiryDate: productData.expiryDate || 'N/A',
+        receivedDate: formatBatchDate(new Date()),
+        expiryDate: normalizeExpiryDate(productData.expiryDate),
         quantityReceived: initialQty,
         quantityRemaining: initialQty,
       });
@@ -458,6 +534,8 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       batches,
       stock: initialQty,
       isAvailable: productData.isAvailable !== undefined ? productData.isAvailable : true,
+      supplierId: productData.initialSupplierId,
+      supplierName: productData.initialSupplierName,
     };
 
     setProducts((prev) => [newProduct, ...prev]);
@@ -484,51 +562,69 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const restockProduct = ({
-    productId,
-    supplierId,
-    supplierName,
-    batchNumber,
-    costPrice,
-    sellingPrice,
-    expiryDate,
-    quantity,
-  }: RestockParams): ProductBatch => {
-    const newBatch: ProductBatch = {
-      id: `batch-${Date.now()}`,
-      productId,
-      supplierId,
-      supplierName,
-      batchNumber,
-      costPrice,
-      sellingPrice,
-      receivedDate: 'Today',
-      expiryDate,
-      quantityReceived: quantity,
-      quantityRemaining: quantity,
-    };
+  const restockProducts = (paramsList: RestockParams[]): ProductBatch[] => {
+    if (!paramsList || paramsList.length === 0) return [];
+
+    const now = new Date();
+    const formattedReceived = formatBatchDate(now);
+
+    const newBatches: ProductBatch[] = paramsList.map((item) => {
+      const normalizedExp = normalizeExpiryDate(item.expiryDate);
+      return {
+        id: `batch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        productId: item.productId,
+        supplierId: item.supplierId,
+        supplierName: item.supplierName,
+        batchNumber: item.batchNumber,
+        costPrice: item.costPrice,
+        sellingPrice: item.sellingPrice,
+        receivedDate: formattedReceived,
+        expiryDate: normalizedExp,
+        quantityReceived: item.quantity,
+        quantityRemaining: item.quantity,
+      };
+    });
 
     setProducts((prev) => {
       const updatedList = prev.map((p) => {
-        if (p.id !== productId) return p;
+        const itemBatches = newBatches.filter((b) => b.productId === p.id);
+        if (itemBatches.length === 0) return p;
+
+        const latestItem = paramsList.filter((it) => it.productId === p.id).pop();
         const existingBatches = p.batches || [];
-        const updatedBatches = [newBatch, ...existingBatches];
-        const combinedStock = updatedBatches.reduce((sum, b) => sum + b.quantityRemaining, 0);
+        const updatedBatches = [...itemBatches, ...existingBatches];
+        const combinedStock = updatedBatches.reduce(
+          (sum, b) => sum + (typeof b.quantityRemaining === 'number' ? b.quantityRemaining : 0),
+          0
+        );
 
         return {
           ...p,
-          price: sellingPrice > 0 ? sellingPrice : p.price,
-          costPrice,
+          price: latestItem && latestItem.sellingPrice > 0 ? latestItem.sellingPrice : p.price,
+          costPrice: latestItem && latestItem.costPrice > 0 ? latestItem.costPrice : p.costPrice,
+          supplierId: p.supplierId || latestItem?.supplierId,
+          supplierName: p.supplierName || latestItem?.supplierName,
           batches: updatedBatches,
           stock: combinedStock,
         };
       });
 
+      // Synchronously write to localStorage to prevent data loss on navigation or reload
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
+      } catch (err) {
+        console.error('Failed to persist products to storage:', err);
+      }
+
       productSyncSocket.broadcastSyncAll(updatedList);
       return updatedList;
     });
 
-    return newBatch;
+    return newBatches;
+  };
+
+  const restockProduct = (params: RestockParams): ProductBatch => {
+    return restockProducts([params])[0];
   };
 
   const deleteProduct = (id: string) => {
@@ -545,6 +641,92 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return prod?.batches || [];
   };
 
+  const deductStock = (deductions: StockDeductionItem[]) => {
+    if (!deductions || deductions.length === 0) return;
+
+    setProducts((prev) => {
+      const updatedList = prev.map((product) => {
+        const itemDeductions = deductions.filter((d) => d.productId === product.id);
+        if (itemDeductions.length === 0) return product;
+
+        const totalQtyToDeduct = itemDeductions.reduce((sum, d) => sum + d.quantity, 0);
+        let updatedBatches = [...(product.batches || [])];
+
+        let overflowUnits = 0;
+        // 1. First process specific batch allocations (from specific supplier barcode scans)
+        itemDeductions.forEach((d) => {
+          if (d.batchAllocations && d.batchAllocations.length > 0) {
+            d.batchAllocations.forEach((alloc) => {
+              const bIdx = updatedBatches.findIndex(
+                (b) =>
+                  (alloc.batchId && b.id === alloc.batchId) ||
+                  (alloc.batchNumber && b.batchNumber.toLowerCase() === alloc.batchNumber.toLowerCase())
+              );
+              if (bIdx >= 0) {
+                const currentRemaining = updatedBatches[bIdx].quantityRemaining ?? 0;
+                if (alloc.quantity > currentRemaining) {
+                  overflowUnits += alloc.quantity - currentRemaining;
+                  updatedBatches[bIdx] = {
+                    ...updatedBatches[bIdx],
+                    quantityRemaining: 0,
+                  };
+                } else {
+                  updatedBatches[bIdx] = {
+                    ...updatedBatches[bIdx],
+                    quantityRemaining: currentRemaining - alloc.quantity,
+                  };
+                }
+              }
+            });
+          }
+        });
+
+        // 2. Check for any remaining units that were not explicitly allocated or overflowed (FIFO fallback)
+        const totalExplicitlyAllocated = itemDeductions.reduce(
+          (sum, d) => sum + (d.batchAllocations?.reduce((aSum, a) => aSum + a.quantity, 0) || 0),
+          0
+        );
+        let remainingToDeductFifo = Math.max(0, totalQtyToDeduct - totalExplicitlyAllocated) + overflowUnits;
+
+        if (remainingToDeductFifo > 0 && updatedBatches.length > 0) {
+          updatedBatches = updatedBatches.map((b) => {
+            if (remainingToDeductFifo <= 0) return b;
+            const currentRem = b.quantityRemaining ?? 0;
+            if (currentRem <= 0) return b;
+            const deduct = Math.min(currentRem, remainingToDeductFifo);
+            remainingToDeductFifo -= deduct;
+            return {
+              ...b,
+              quantityRemaining: currentRem - deduct,
+            };
+          });
+        }
+
+        // 3. Recalculate combined product stock as sum of remaining batch quantities
+        const combinedStock =
+          updatedBatches.length > 0
+            ? updatedBatches.reduce((sum, b) => sum + (b.quantityRemaining ?? 0), 0)
+            : Math.max(0, product.stock - totalQtyToDeduct);
+
+        return {
+          ...product,
+          batches: updatedBatches,
+          stock: combinedStock,
+        };
+      });
+
+      // Synchronously write to localStorage to prevent data loss on navigation or reload
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
+      } catch (err) {
+        console.error('Failed to persist products to storage after stock deduction:', err);
+      }
+
+      productSyncSocket.broadcastSyncAll(updatedList);
+      return updatedList;
+    });
+  };
+
   return (
     <ProductContext.Provider
       value={{
@@ -553,6 +735,8 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateProduct,
         deleteProduct,
         restockProduct,
+        restockProducts,
+        deductStock,
         getProductById,
         getBatchesForProduct,
       }}

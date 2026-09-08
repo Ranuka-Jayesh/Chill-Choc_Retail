@@ -6,6 +6,7 @@ const server = createServer();
 const wss = new WebSocketServer({ server });
 
 let cachedProducts = null;
+let cachedReturns = null;
 
 wss.on('connection', (ws, req) => {
   const ip = req.socket.remoteAddress;
@@ -15,6 +16,11 @@ wss.on('connection', (ws, req) => {
   if (cachedProducts && cachedProducts.length > 0) {
     try {
       ws.send(JSON.stringify({ type: 'PRODUCTS_SYNC_ALL', payload: cachedProducts }));
+    } catch {}
+  }
+  if (cachedReturns && cachedReturns.length > 0) {
+    try {
+      ws.send(JSON.stringify({ type: 'SYNC_RETURNS', payload: cachedReturns }));
     } catch {}
   }
 
@@ -27,6 +33,8 @@ wss.on('connection', (ws, req) => {
         cachedProducts = message.payload;
       } else if (message.type === 'REQUEST_SYNC' && cachedProducts && cachedProducts.length > 0) {
         ws.send(JSON.stringify({ type: 'PRODUCTS_SYNC_ALL', payload: cachedProducts }));
+      } else if (message.type === 'SYNC_RETURNS' && Array.isArray(message.payload)) {
+        cachedReturns = message.payload;
       }
 
       // Broadcast to all other peers

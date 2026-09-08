@@ -70,7 +70,7 @@ export const useBarcodeScanner = ({
 
         if (isScanCandidate) {
           e.preventDefault();
-          e.stopPropagation();
+          e.stopImmediatePropagation();
 
           // If the active input received the scanned text, clear it so it doesn't leave stray text
           if (isInputFocused && activeEl instanceof HTMLInputElement) {
@@ -102,6 +102,10 @@ export const useBarcodeScanner = ({
           bufferRef.current += e.key;
           if (interval > 0) {
             strokeIntervalsRef.current.push(interval);
+          }
+          // If this is rapid keystrokes from a scanner (interval <= 100ms), prevent leaking to hotkeys
+          if (interval <= 100) {
+            e.stopPropagation();
           }
         }
       }

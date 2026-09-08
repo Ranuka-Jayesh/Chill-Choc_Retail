@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Product, CartItem, Salesperson, Customer, BillDiscount } from '@/types';
+import { Product, CartItem, Salesperson, Customer, BillDiscount, BatchAllocation } from '@/types';
 import { useToast } from './toastStore';
+import { StockOverData } from '@/components/modals/SupplierStockOverModal';
 
 interface CartContextType {
   items: CartItem[];
@@ -19,7 +20,13 @@ interface CartContextType {
   selectPreviousItem: () => void;
   incrementSelectedItem: () => void;
   decrementSelectedItem: () => void;
-  addItem: (product: Product, quantity?: number, salesperson?: Salesperson | null) => void;
+  addItem: (
+    product: Product,
+    quantity?: number,
+    salesperson?: Salesperson | null,
+    scannedBatchNumber?: string | null,
+    targetSupplierId?: string | null
+  ) => boolean;
   updateQuantity: (itemId: string, quantity: number) => void;
   incrementLastItem: () => void;
   decrementLastItem: () => void;
@@ -38,6 +45,8 @@ interface CartContextType {
   assignSalesperson: (sp: Salesperson | null, itemId?: string | null) => void;
   showClearConfirm: boolean;
   setShowClearConfirm: (show: boolean) => void;
+  stockOverData: StockOverData | null;
+  setStockOverData: (data: StockOverData | null) => void;
 }
 
 const DEFAULT_CUSTOMER: Customer = {
@@ -46,6 +55,190 @@ const DEFAULT_CUSTOMER: Customer = {
   phone: '',
   isWalkIn: true,
 };
+
+// Helper to allocate units to supplier batches
+function allocateToBatches(
+  product: Product,
+  currentAllocations: BatchAllocation[] = [],
+  quantityToAdd: number,
+  targetBatchNumber?: string | null,
+  targetSupplierId?: string | null
+): BatchAllocation[] {
+  const result: BatchAllocation[] = currentAllocations.map((a) => ({ ...a }));
+  const batches = product.batches || [];
+
+  // 1. Target specific batch number
+  if (targetBatchNumber && batches.length > 0) {
+    const matchedBatch = batches.find(
+      (b) => b.batchNumber.toLowerCase() === targetBatchNumber.toLowerCase()
+    );
+    if (matchedBatch) {
+      const existingAlloc = result.find(
+        (a) =>
+          (a.batchId && a.batchId === matchedBatch.id) ||
+          a.batchNumber.toLowerCase() === matchedBatch.batchNumber.toLowerCase()
+      );
+
+      if (existingAlloc) {
+        existingAlloc.quantity += quantityToAdd;
+      } else {
+        result.push({
+          batchId: matchedBatch.id,
+          batchNumber: matchedBatch.batchNumber,
+          supplierId: matchedBatch.supplierId,
+          supplierName: matchedBatch.supplierName,
+          quantity: quantityToAdd,
+          costPrice: matchedBatch.costPrice,
+          expiryDate: matchedBatch.expiryDate,
+        });
+      }
+      return result;
+    }
+  }
+
+  // 2. Target specific supplier
+  if (targetSupplierId && batches.length > 0) {
+    const supplierBatches = batches.filter(
+      (b) =>
+        b.supplierId === targetSupplierId ||
+        b.supplierName.toLowerCase() === targetSupplierId.toLowerCase()
+    );
+
+    if (supplierBatches.length > 0) {
+      let remainingToAdd = quantityToAdd;
+      for (const b of supplierBatches) {
+        if (remainingToAdd <= 0) break;
+        const existingAlloc = result.find(
+          (a) =>
+            (a.batchId && a.batchId === b.id) ||
+            a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase()
+        );
+        const allocatedFromThisBatch = existingAlloc ? existingAlloc.quantity : 0;
+        const batchCapacity = b.quantityRemaining ?? 0;
+        const available = Math.max(0, batchCapacity - allocatedFromThisBatch);
+
+        if (available > 0) {
+          const take = Math.min(available, remainingToAdd);
+          if (existingAlloc) {
+            existingAlloc.quantity += take;
+          } else {
+            result.push({
+              batchId: b.id,
+              batchNumber: b.batchNumber,
+              supplierId: b.supplierId,
+              supplierName: b.supplierName,
+              quantity: take,
+              costPrice: b.costPrice,
+              expiryDate: b.expiryDate,
+            });
+          }
+          remainingToAdd -= take;
+        }
+      }
+
+      if (remainingToAdd > 0) {
+        const firstSupBatch = supplierBatches[0];
+        const existingAlloc = result.find(
+          (a) =>
+            (a.batchId && a.batchId === firstSupBatch.id) ||
+            a.batchNumber.toLowerCase() === firstSupBatch.batchNumber.toLowerCase()
+        );
+        if (existingAlloc) {
+          existingAlloc.quantity += remainingToAdd;
+        } else {
+          result.push({
+            batchId: firstSupBatch.id,
+            batchNumber: firstSupBatch.batchNumber,
+            supplierId: firstSupBatch.supplierId,
+            supplierName: firstSupBatch.supplierName,
+            quantity: remainingToAdd,
+            costPrice: firstSupBatch.costPrice,
+            expiryDate: firstSupBatch.expiryDate,
+          });
+        }
+      }
+      return result;
+    }
+  }
+
+  // Fallback FIFO allocation across available batches
+  let remainingToAdd = quantityToAdd;
+  for (const b of batches) {
+    if (remainingToAdd <= 0) break;
+    const existingAlloc = result.find(
+      (a) =>
+        (a.batchId && a.batchId === b.id) ||
+        a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase()
+    );
+    const allocatedFromThisBatch = existingAlloc ? existingAlloc.quantity : 0;
+    const batchCapacity = b.quantityRemaining ?? 0;
+    const available = Math.max(0, batchCapacity - allocatedFromThisBatch);
+
+    if (available > 0) {
+      const take = Math.min(available, remainingToAdd);
+      if (existingAlloc) {
+        existingAlloc.quantity += take;
+      } else {
+        result.push({
+          batchId: b.id,
+          batchNumber: b.batchNumber,
+          supplierId: b.supplierId,
+          supplierName: b.supplierName,
+          quantity: take,
+          costPrice: b.costPrice,
+          expiryDate: b.expiryDate,
+        });
+      }
+      remainingToAdd -= take;
+    }
+  }
+
+  // If there are still remaining units or no batches with stock, append to first batch or fallback
+  if (remainingToAdd > 0 && batches.length > 0) {
+    const firstBatch = batches[0];
+    const existingAlloc = result.find(
+      (a) =>
+        (a.batchId && a.batchId === firstBatch.id) ||
+        a.batchNumber.toLowerCase() === firstBatch.batchNumber.toLowerCase()
+    );
+    if (existingAlloc) {
+      existingAlloc.quantity += remainingToAdd;
+    } else {
+      result.push({
+        batchId: firstBatch.id,
+        batchNumber: firstBatch.batchNumber,
+        supplierId: firstBatch.supplierId,
+        supplierName: firstBatch.supplierName,
+        quantity: remainingToAdd,
+        costPrice: firstBatch.costPrice,
+        expiryDate: firstBatch.expiryDate,
+      });
+    }
+  }
+
+  return result;
+}
+
+function reduceFromBatches(
+  currentAllocations: BatchAllocation[] = [],
+  quantityToReduce: number
+): BatchAllocation[] {
+  const result: BatchAllocation[] = currentAllocations.map((a) => ({ ...a }));
+  let toRemove = quantityToReduce;
+
+  // Reduce from the last added allocation backwards (LIFO)
+  for (let i = result.length - 1; i >= 0 && toRemove > 0; i--) {
+    if (result[i].quantity <= toRemove) {
+      toRemove -= result[i].quantity;
+      result[i].quantity = 0;
+    } else {
+      result[i].quantity -= toRemove;
+      toRemove = 0;
+    }
+  }
+
+  return result.filter((a) => a.quantity > 0);
+}
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
@@ -58,6 +251,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [itemPendingRemoval, setItemPendingRemoval] = useState<CartItem | null>(null);
   const [defaultSalesperson, setDefaultSalesperson] = useState<Salesperson | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
+  const [stockOverData, setStockOverData] = useState<StockOverData | null>(null);
   const selectedItemIdRef = useRef<string | null>(null);
   const itemsRef = useRef<CartItem[]>(items);
 
@@ -72,78 +266,366 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const { showToast } = useToast();
 
-  const addItem = useCallback((product: Product, quantity = 1, salesperson: Salesperson | null = null) => {
-    if (product.isAvailable === false) {
-      showToast(`${product.name} is currently Unavailable`, 'warning');
-      return;
-    }
+  const addItem = useCallback(
+    (
+      product: Product,
+      quantity = 1,
+      salesperson: Salesperson | null = null,
+      scannedBatchNumber?: string | null,
+      targetSupplierId?: string | null
+    ): boolean => {
+      if (product.isAvailable === false) {
+        showToast(`${product.name} is currently Unavailable`, 'warning');
+        return false;
+      }
 
-    if (product.stock <= 0) {
-      showToast(`${product.name} is Out of Stock`, 'error');
-      return;
-    }
+      if (product.stock <= 0) {
+        showToast(`${product.name} is Out of Stock`, 'error');
+        return false;
+      }
 
-    const existingItem = items.find((item) => item.product.id === product.id);
+      const existingItem = items.find((item) => item.product.id === product.id);
 
-    if (existingItem) {
-      const newQty = existingItem.quantity + quantity;
-      if (newQty > product.stock) {
-        showToast(`Cannot add more. Only ${product.stock} units in stock.`, 'warning');
+      // If specific batch number is targeted, check if that batch's stock is exceeded
+      if (scannedBatchNumber && product.batches && product.batches.length > 0) {
+        const matchedBatch = product.batches.find(
+          (b) => b.batchNumber.toLowerCase() === scannedBatchNumber.toLowerCase()
+        );
+        if (matchedBatch) {
+          const existingAllocations = existingItem?.batchAllocations || [];
+          const alreadyAllocated = existingAllocations
+            .filter(
+              (a) =>
+                (a.batchId && a.batchId === matchedBatch.id) ||
+                a.batchNumber.toLowerCase() === matchedBatch.batchNumber.toLowerCase()
+            )
+            .reduce((sum, a) => sum + a.quantity, 0);
+
+          if (alreadyAllocated + quantity > (matchedBatch.quantityRemaining ?? 0)) {
+            const otherBatches = product.batches
+              .filter(
+                (b) =>
+                  b.supplierId === matchedBatch.supplierId &&
+                  b.id !== matchedBatch.id
+              )
+              .map((b) => {
+                const inCart = existingAllocations
+                  .filter(
+                    (a) =>
+                      (a.batchId && a.batchId === b.id) ||
+                      a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase()
+                  )
+                  .reduce((s, a) => s + a.quantity, 0);
+                const avail = Math.max(0, (b.quantityRemaining ?? 0) - inCart);
+                return { ...b, inCartQty: inCart, stock: avail, isStockOver: avail <= 0 };
+              })
+              .filter((b) => b.stock > 0);
+
+            const supplierMap = new Map<string, any>();
+            for (const b of product.batches) {
+              if (b.supplierId === matchedBatch.supplierId) continue;
+              const inCart = existingAllocations
+                .filter((a) => a.supplierId === b.supplierId)
+                .reduce((s, a) => s + a.quantity, 0);
+              const avail = Math.max(0, (b.quantityRemaining ?? 0) - inCart);
+              if (avail > 0) {
+                if (supplierMap.has(b.supplierId)) {
+                  supplierMap.get(b.supplierId).stock += avail;
+                } else {
+                  supplierMap.set(b.supplierId, {
+                    supplierId: b.supplierId,
+                    supplierName: b.supplierName,
+                    stock: avail,
+                    totalStock: b.quantityRemaining ?? 0,
+                    isStockOver: false,
+                    batchCount: 1,
+                    inCartQty: inCart,
+                  });
+                }
+              }
+            }
+
+            setStockOverData({
+              product,
+              exceededSupplier: {
+                supplierId: matchedBatch.supplierId,
+                supplierName: matchedBatch.supplierName,
+                totalStock: matchedBatch.quantityRemaining ?? 0,
+                inCartQty: alreadyAllocated,
+                stock: 0,
+                isStockOver: true,
+                batchCount: 1,
+              },
+              exceededBatch: matchedBatch,
+              availableBatches: otherBatches,
+              availableSuppliers: Array.from(supplierMap.values()),
+            });
+            return false;
+          }
+        }
+      }
+
+      // If target supplier is specified, check if that supplier's stock is exceeded
+      if (targetSupplierId && product.batches && product.batches.length > 0) {
+        const supplierBatches = product.batches.filter(
+          (b) =>
+            b.supplierId === targetSupplierId ||
+            b.supplierName.toLowerCase() === targetSupplierId.toLowerCase()
+        );
+        const supplierTotalStock = supplierBatches.reduce(
+          (sum, b) => sum + (b.quantityRemaining ?? 0),
+          0
+        );
+        const existingAllocations = existingItem?.batchAllocations || [];
+        const alreadyAllocated = existingAllocations
+          .filter(
+            (a) =>
+              a.supplierId === targetSupplierId ||
+              a.supplierName.toLowerCase() === targetSupplierId.toLowerCase()
+          )
+          .reduce((sum, a) => sum + a.quantity, 0);
+
+        if (alreadyAllocated + quantity > supplierTotalStock) {
+          const supplierMap = new Map<string, any>();
+          for (const b of product.batches) {
+            if (b.supplierId === targetSupplierId || b.supplierName.toLowerCase() === targetSupplierId.toLowerCase()) {
+              continue;
+            }
+            const inCart = existingAllocations
+              .filter((a) => a.supplierId === b.supplierId)
+              .reduce((s, a) => s + a.quantity, 0);
+            const avail = Math.max(0, (b.quantityRemaining ?? 0) - inCart);
+            if (avail > 0) {
+              if (supplierMap.has(b.supplierId)) {
+                supplierMap.get(b.supplierId).stock += avail;
+              } else {
+                supplierMap.set(b.supplierId, {
+                  supplierId: b.supplierId,
+                  supplierName: b.supplierName,
+                  stock: avail,
+                  totalStock: b.quantityRemaining ?? 0,
+                  isStockOver: false,
+                  batchCount: 1,
+                  inCartQty: inCart,
+                });
+              }
+            }
+          }
+
+          setStockOverData({
+            product,
+            exceededSupplier: {
+              supplierId: targetSupplierId,
+              supplierName: supplierBatches[0]?.supplierName || 'Selected Supplier',
+              totalStock: supplierTotalStock,
+              inCartQty: alreadyAllocated,
+              stock: 0,
+              isStockOver: true,
+              batchCount: supplierBatches.length,
+            },
+            exceededBatch: null,
+            availableBatches: [],
+            availableSuppliers: Array.from(supplierMap.values()),
+          });
+          return false;
+        }
+      }
+
+      if (existingItem) {
+        const newQty = existingItem.quantity + quantity;
+        if (newQty > product.stock) {
+          showToast(`Cannot add more. Only ${product.stock} units total in stock.`, 'warning');
+          return false;
+        }
+
+        const newAllocations = allocateToBatches(
+          product,
+          existingItem.batchAllocations || [],
+          quantity,
+          scannedBatchNumber,
+          targetSupplierId
+        );
+
+        selectedItemIdRef.current = existingItem.id;
+        setSelectedItemId(existingItem.id);
+        setItems((prevItems) =>
+          prevItems.map((item) =>
+            item.product.id === product.id
+              ? { ...item, quantity: newQty, batchAllocations: newAllocations }
+              : item
+          )
+        );
+        setTimeout(() => {
+          const el = document.getElementById(`cart-item-row-${existingItem.id}`);
+          el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }, 10);
+        return true;
+      } else {
+        if (quantity > product.stock) {
+          showToast(`Cannot add more. Only ${product.stock} units total in stock.`, 'warning');
+          return false;
+        }
+
+        const newAllocations = allocateToBatches(
+          product,
+          [],
+          quantity,
+          scannedBatchNumber,
+          targetSupplierId
+        );
+
+        const effectiveSalesperson = salesperson || defaultSalesperson;
+        const newItem: CartItem = {
+          id: `cart-item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          product,
+          quantity,
+          unitPrice: product.price,
+          salesperson: effectiveSalesperson,
+          discount: null,
+          batchAllocations: newAllocations,
+        };
+        selectedItemIdRef.current = newItem.id;
+        setSelectedItemId(newItem.id);
+        setItems((prevItems) => [...prevItems, newItem]);
+        setTimeout(() => {
+          const el = document.getElementById(`cart-item-row-${newItem.id}`);
+          el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }, 10);
+        return true;
+      }
+    },
+    [items, defaultSalesperson, showToast]
+  );
+
+  const updateQuantity = useCallback(
+    (itemId: string, quantity: number) => {
+      if (quantity <= 0) {
+        const target = itemsRef.current.find((item) => item.id === itemId);
+        if (target) {
+          setItemPendingRemoval(target);
+        }
         return;
       }
 
-      selectedItemIdRef.current = existingItem.id;
-      setSelectedItemId(existingItem.id);
-      setItems((prevItems) =>
-        prevItems.map((item) =>
-          item.product.id === product.id ? { ...item, quantity: newQty } : item
-        )
-      );
-      setTimeout(() => {
-        const el = document.getElementById(`cart-item-row-${existingItem.id}`);
-        el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }, 10);
-    } else {
-      const effectiveSalesperson = salesperson || defaultSalesperson;
-      const newItem: CartItem = {
-        id: `cart-item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        product,
-        quantity,
-        unitPrice: product.price,
-        salesperson: effectiveSalesperson,
-        discount: null,
-      };
-      selectedItemIdRef.current = newItem.id;
-      setSelectedItemId(newItem.id);
-      setItems((prevItems) => [...prevItems, newItem]);
-      setTimeout(() => {
-        const el = document.getElementById(`cart-item-row-${newItem.id}`);
-        el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }, 10);
-    }
-  }, [items, showToast]);
-
-  const updateQuantity = useCallback((itemId: string, quantity: number) => {
-    if (quantity <= 0) {
-      const target = itemsRef.current.find((item) => item.id === itemId);
-      if (target) {
-        setItemPendingRemoval(target);
+      const target = items.find((item) => item.id === itemId);
+      if (target && quantity > target.product.stock) {
+        showToast(`Max available stock is ${target.product.stock}`, 'warning');
+        return;
       }
-      return;
-    }
 
-    const target = items.find((item) => item.id === itemId);
-    if (target && quantity > target.product.stock) {
-      showToast(`Max available stock is ${target.product.stock}`, 'warning');
-      return;
-    }
+      // Check if increasing quantity exceeds the capacity of the current batch
+      if (target && quantity > target.quantity) {
+        const added = quantity - target.quantity;
+        const allocs = target.batchAllocations || [];
+        const lastAlloc = allocs[allocs.length - 1];
 
-    selectedItemIdRef.current = itemId;
-    setSelectedItemId(itemId);
-    setItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, quantity } : item))
-    );
-  }, [items, showToast]);
+        if (lastAlloc && target.product.batches && target.product.batches.length > 0) {
+          const matchedBatch = target.product.batches.find(
+            (b) =>
+              (lastAlloc.batchId && b.id === lastAlloc.batchId) ||
+              b.batchNumber.toLowerCase() === lastAlloc.batchNumber.toLowerCase()
+          );
+
+          if (matchedBatch) {
+            const allocatedToThisBatch = allocs
+              .filter(
+                (a) =>
+                  (a.batchId && a.batchId === matchedBatch.id) ||
+                  a.batchNumber.toLowerCase() === matchedBatch.batchNumber.toLowerCase()
+              )
+              .reduce((sum, a) => sum + a.quantity, 0);
+
+            const batchLimit = matchedBatch.quantityRemaining ?? 0;
+            if (allocatedToThisBatch + added > batchLimit) {
+              const otherBatches = target.product.batches
+                .filter(
+                  (b) =>
+                    b.supplierId === matchedBatch.supplierId &&
+                    b.id !== matchedBatch.id
+                )
+                .map((b) => {
+                  const inCart = allocs
+                    .filter(
+                      (a) =>
+                        (a.batchId && a.batchId === b.id) ||
+                        a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase()
+                    )
+                    .reduce((sum, a) => sum + a.quantity, 0);
+                  const avail = Math.max(0, (b.quantityRemaining ?? 0) - inCart);
+                  return { ...b, inCartQty: inCart, stock: avail, isStockOver: avail <= 0 };
+                })
+                .filter((b) => b.stock > 0);
+
+              const supplierMap = new Map<string, any>();
+              for (const b of target.product.batches) {
+                if (b.supplierId === matchedBatch.supplierId) continue;
+                const inCart = allocs
+                  .filter((a) => a.supplierId === b.supplierId)
+                  .reduce((sum, a) => sum + a.quantity, 0);
+                const avail = Math.max(0, (b.quantityRemaining ?? 0) - inCart);
+                if (avail > 0) {
+                  if (supplierMap.has(b.supplierId)) {
+                    supplierMap.get(b.supplierId).stock += avail;
+                  } else {
+                    supplierMap.set(b.supplierId, {
+                      supplierId: b.supplierId,
+                      supplierName: b.supplierName,
+                      stock: avail,
+                      totalStock: b.quantityRemaining ?? 0,
+                      isStockOver: false,
+                      batchCount: 1,
+                      inCartQty: inCart,
+                    });
+                  }
+                }
+              }
+
+              const otherSuppliers = Array.from(supplierMap.values());
+
+              if (otherBatches.length > 0 || otherSuppliers.length > 0) {
+                setStockOverData({
+                  product: target.product,
+                  exceededSupplier: {
+                    supplierId: matchedBatch.supplierId,
+                    supplierName: matchedBatch.supplierName,
+                    totalStock: batchLimit,
+                    inCartQty: allocatedToThisBatch,
+                    stock: 0,
+                    isStockOver: true,
+                    batchCount: 1,
+                  },
+                  exceededBatch: matchedBatch,
+                  availableBatches: otherBatches,
+                  availableSuppliers: otherSuppliers,
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      selectedItemIdRef.current = itemId;
+      setSelectedItemId(itemId);
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id !== itemId) return item;
+
+          let newAllocations = item.batchAllocations || [];
+          if (quantity > item.quantity) {
+            const added = quantity - item.quantity;
+            newAllocations = allocateToBatches(item.product, newAllocations, added, null);
+          } else if (quantity < item.quantity) {
+            const removed = item.quantity - quantity;
+            newAllocations = reduceFromBatches(newAllocations, removed);
+          }
+
+          return { ...item, quantity, batchAllocations: newAllocations };
+        })
+      );
+    },
+    [items, showToast]
+  );
 
   const selectNextItem = useCallback(() => {
     const currentItems = itemsRef.current;
@@ -210,12 +692,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       showToast(`Max available stock is ${target.product.stock}`, 'warning');
       return;
     }
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === targetId ? { ...item, quantity: item.quantity + 1 } : item
-      )
-    );
-  }, [showToast]);
+    updateQuantity(targetId, target.quantity + 1);
+  }, [updateQuantity, showToast]);
 
   const decrementSelectedItem = useCallback(() => {
     const currentItems = itemsRef.current;
@@ -235,12 +713,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === targetId ? { ...item, quantity: item.quantity - 1 } : item
-      )
-    );
-  }, []);
+    updateQuantity(targetId, target.quantity - 1);
+  }, [updateQuantity]);
 
   const updateSalesperson = useCallback((itemId: string, salesperson: Salesperson | null) => {
     setItems((prev) =>
@@ -253,12 +727,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (targetItemId) {
       setItems((prev) =>
         prev.map((item) => (item.id === targetItemId ? { ...item, salesperson: sp } : item))
-      );
-    } else if (selectedItemIdRef.current) {
-      setItems((prev) =>
-        prev.map((item) =>
-          item.id === selectedItemIdRef.current ? { ...item, salesperson: sp } : item
-        )
       );
     } else {
       setItems((prev) =>
@@ -396,6 +864,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         assignSalesperson,
         showClearConfirm,
         setShowClearConfirm,
+        stockOverData,
+        setStockOverData,
       }}
     >
       {children}

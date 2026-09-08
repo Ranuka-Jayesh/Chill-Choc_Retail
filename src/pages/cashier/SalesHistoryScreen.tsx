@@ -7,7 +7,7 @@ import { MOCK_PRODUCTS } from '@/data/mockProducts';
 import { CashierHeader } from '@/components/pos/CashierHeader';
 import { ReceiptPreviewModal } from '@/components/modals/ReceiptPreviewModal';
 import { AppFooter } from '@/components/common/AppFooter';
-import { CustomDatePicker } from '@/components/common/CustomDatePicker';
+import { CustomDatePicker, DateFilterMode } from '@/components/common/CustomDatePicker';
 import { CompletedSale } from '@/types';
 import {
   ArrowLeft,
@@ -27,7 +27,7 @@ export const SalesHistoryScreen: React.FC = () => {
   const { showToast } = useToast();
 
   const [search, setSearch] = useState('');
-  const [filterMode, setFilterMode] = useState<'all' | 'today' | 'yesterday' | 'month' | 'custom'>('all');
+  const [filterMode, setFilterMode] = useState<DateFilterMode>('all');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'Completed' | 'Returned'>('all');
 
@@ -139,7 +139,7 @@ export const SalesHistoryScreen: React.FC = () => {
   }, [navigate, selectedSaleForReceipt]);
 
   const handleSelectPeriod = (
-    mode: 'all' | 'today' | 'yesterday' | 'month' | 'custom',
+    mode: DateFilterMode,
     dateStr?: string
   ) => {
     setFilterMode(mode);
@@ -168,6 +168,7 @@ export const SalesHistoryScreen: React.FC = () => {
     if (filterMode === 'today') {
       return (
         sale.date === 'Today' ||
+        sale.date === '2026-09-08' ||
         sale.date === '2026-09-05' ||
         !sale.date
       );
@@ -176,26 +177,32 @@ export const SalesHistoryScreen: React.FC = () => {
     if (filterMode === 'yesterday') {
       return (
         sale.date === 'Yesterday' ||
+        sale.date === '2026-09-07' ||
         sale.date === '2026-09-04'
       );
     }
 
     if (filterMode === 'month') {
+      if (selectedDate) {
+        return sale.date === 'Today' || sale.date === 'Yesterday' || sale.date?.startsWith(selectedDate);
+      }
       return (
         sale.date === 'Today' ||
         sale.date === 'Yesterday' ||
-        sale.date.startsWith('2026-09')
+        sale.date?.startsWith('2026-09')
       );
     }
 
+    if (filterMode === 'year') {
+      const yr = selectedDate || '2026';
+      return sale.date === 'Today' || sale.date === 'Yesterday' || sale.date?.startsWith(yr);
+    }
+
     if (filterMode === 'custom' && selectedDate) {
-      if (selectedDate === '2026-09-05') {
-        return sale.date === 'Today' || sale.date === '2026-09-05';
-      }
-      if (selectedDate === '2026-09-04') {
-        return sale.date === 'Yesterday' || sale.date === '2026-09-04';
-      }
-      return sale.date === selectedDate;
+      return (
+        sale.date === selectedDate ||
+        (sale.date === 'Today' && selectedDate === new Date().toISOString().split('T')[0])
+      );
     }
 
     return true;

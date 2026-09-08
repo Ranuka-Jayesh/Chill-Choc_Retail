@@ -43,16 +43,14 @@ export const usePosShortcuts = (handlers: ShortcutHandlers, enabled = true) => {
         document.activeElement instanceof HTMLInputElement ||
         document.activeElement instanceof HTMLTextAreaElement;
 
-      // Handle keyboard + / - for adjusting selected item quantity
+      // Handle keyboard + / - for adjusting selected item quantity (use Numpad or Ctrl to avoid conflict with barcode hyphens)
       const isPlusKey =
-        (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') &&
-        !e.ctrlKey &&
+        (e.code === 'NumpadAdd' || (e.ctrlKey && (e.key === '+' || e.key === '='))) &&
         !e.metaKey &&
         !e.altKey;
 
       const isMinusKey =
-        (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') &&
-        !e.ctrlKey &&
+        (e.code === 'NumpadSubtract' || (e.ctrlKey && (e.key === '-' || e.key === '_'))) &&
         !e.metaKey &&
         !e.altKey;
 
@@ -144,7 +142,12 @@ export const usePosShortcuts = (handlers: ShortcutHandlers, enabled = true) => {
           (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) &&
           !isSearchInput;
 
-        if (!isOtherInput && (!isSearchInput || activeEl.value.trim().length === 0)) {
+        // When search input is active, allow it to navigate products
+        if (isSearchInput) {
+          return;
+        }
+
+        if (!isOtherInput) {
           e.preventDefault();
           h.onArrowUp?.();
           return;
@@ -160,7 +163,12 @@ export const usePosShortcuts = (handlers: ShortcutHandlers, enabled = true) => {
           (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) &&
           !isSearchInput;
 
-        if (!isOtherInput && (!isSearchInput || activeEl.value.trim().length === 0)) {
+        // When search input is active, allow it to navigate products
+        if (isSearchInput) {
+          return;
+        }
+
+        if (!isOtherInput) {
           e.preventDefault();
           h.onArrowDown?.();
           return;

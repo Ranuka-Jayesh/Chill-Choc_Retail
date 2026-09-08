@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Product, ConfectionCategory } from '@/types';
 import { CategoryFilter } from './CategoryFilter';
 import { POSSearch } from './POSSearch';
 import { Plus, SearchX } from 'lucide-react';
+import { useCart } from '@/stores/cartStore';
+
+import { ExpiredProductData } from '@/components/modals/ProductExpiredModal';
 
 interface ProductListViewProps {
   products: Product[];
@@ -14,6 +17,7 @@ interface ProductListViewProps {
   onSearchChange: (q: string) => void;
   onAddToCart: (product: Product) => void;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  onProductExpired?: (data: ExpiredProductData) => void;
 }
 
 export const ProductListView: React.FC<ProductListViewProps> = ({
@@ -26,11 +30,152 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onSearchChange,
   onAddToCart,
   searchInputRef,
+  onProductExpired,
 }) => {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+  const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const { items: cartItems } = useCart();
+
+  const cols = viewMode === 'grid' ? 3 : 1;
+
+  // Handle focus when search bar is activated (F1 or clicked)
+  const handleSearchFocus = () => {
+    setIsSearchFocused(true);
+    if (products.length > 0) {
+      const firstAvailable = products.findIndex(
+        (p) =>
+          p.isAvailable !== false &&
+          p.stock - (cartItems.find((ci) => ci.product.id === p.id)?.quantity || 0) > 0
+      );
+      setSelectedIndex(firstAvailable !== -1 ? firstAvailable : 0);
+    }
+  };
+
+  const handleSearchBlur = () => {
+    // Managed cooperatively with click-outside
+  };
+
+  // Click outside listener: deactivates card selection and search bar focus
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsSearchFocused(false);
+        setSelectedIndex(-1);
+        searchInputRef?.current?.blur();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [searchInputRef]);
+
+  // Adjust selectedIndex bounds when products change
+  useEffect(() => {
+    if (products.length === 0) {
+      setSelectedIndex(-1);
+      return;
+    }
+    if (isSearchFocused) {
+      if (selectedIndex >= products.length) {
+        setSelectedIndex(Math.max(0, products.length - 1));
+      } else if (selectedIndex < 0) {
+        setSelectedIndex(0);
+      }
+    }
+  }, [products.length, isSearchFocused, selectedIndex]);
+
+  const handleArrowRight = () => {
+    if (products.length === 0) return;
+    if (!isSearchFocused) {
+      setIsSearchFocused(true);
+      setSelectedIndex(0);
+      return;
+    }
+    setSelectedIndex((prev) => Math.min(products.length - 1, Math.max(0, prev) + 1));
+  };
+
+  const handleArrowLeft = () => {
+    if (products.length === 0) return;
+    if (!isSearchFocused) {
+      setIsSearchFocused(true);
+      setSelectedIndex(0);
+      return;
+    }
+    setSelectedIndex((prev) => Math.max(0, prev - 1));
+  };
+
+  const handleArrowDown = () => {
+    if (products.length === 0) return;
+    if (!isSearchFocused) {
+      setIsSearchFocused(true);
+      setSelectedIndex(0);
+      return;
+    }
+    setSelectedIndex((prev) => {
+      const cur = Math.max(0, prev);
+      const next = cur + cols;
+      if (next < products.length) return next;
+      return Math.min(products.length - 1, cur + 1);
+    });
+  };
+
+  const handleArrowUp = () => {
+    if (products.length === 0) return;
+    if (!isSearchFocused) {
+      setIsSearchFocused(true);
+      setSelectedIndex(0);
+      return;
+    }
+    setSelectedIndex((prev) => {
+      const cur = Math.max(0, prev);
+      const next = cur - cols;
+      if (next >= 0) return next;
+      return Math.max(0, cur - 1);
+    });
+  };
+
+  const handleSelectProduct = () => {
+    if (!isSearchFocused || selectedIndex < 0 || selectedIndex >= products.length) return;
+    const selected = products[selectedIndex];
+    if (selected && selected.isAvailable !== false) {
+      onAddToCart(selected);
+      // After adding item to cart, deactivate selection and search bar
+      setIsSearchFocused(false);
+      setSelectedIndex(-1);
+      onSearchChange('');
+      searchInputRef?.current?.blur();
+    }
+  };
+
+  const handleCardClick = (product: Product, isOutOfStock: boolean, isUnavailable: boolean) => {
+    if (!isOutOfStock && !isUnavailable) {
+      onAddToCart(product);
+      // After adding item to cart, deactivate selection and search bar
+      setIsSearchFocused(false);
+      setSelectedIndex(-1);
+      onSearchChange('');
+      searchInputRef?.current?.blur();
+    }
+  };
+
+  // Scroll active card into view smoothly
+  useEffect(() => {
+    if (isSearchFocused && selectedIndex >= 0 && cardRefs.current[selectedIndex]) {
+      cardRefs.current[selectedIndex]?.scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth',
+      });
+    }
+  }, [selectedIndex, isSearchFocused]);
 
   return (
-    <div className="h-full flex flex-col bg-white border-r border-zinc-200 select-none overflow-hidden">
+    <div
+      ref={containerRef}
+      className="h-full flex flex-col bg-white border-r border-zinc-200 select-none overflow-hidden"
+    >
       {/* Search & Scanner Input Header */}
       <div className="p-3 pb-2 border-b border-zinc-100 bg-white">
         <POSSearch
@@ -40,6 +185,15 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           inputRef={searchInputRef}
           viewMode={viewMode}
           onToggleViewMode={() => setViewMode((prev) => (prev === 'grid' ? 'list' : 'grid'))}
+          onArrowRight={handleArrowRight}
+          onArrowLeft={handleArrowLeft}
+          onArrowUp={handleArrowUp}
+          onArrowDown={handleArrowDown}
+          onSelectProduct={handleSelectProduct}
+          isFocused={isSearchFocused}
+          onFocus={handleSearchFocus}
+          onBlur={handleSearchBlur}
+          onProductExpired={onProductExpired}
         />
 
         {/* Category Pills Header (Full-width horizontal scroll) */}
@@ -67,19 +221,32 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
         ) : viewMode === 'list' ? (
           /* Minimal List View with Confection Images */
           <div className="space-y-1">
-            {products.map((product) => {
+            {products.map((product, index) => {
+              const inCartItem = cartItems.find((ci) => ci.product.id === product.id);
+              const inCartQty = inCartItem ? inCartItem.quantity : 0;
+              const availableStock = Math.max(0, product.stock - inCartQty);
               const isUnavailable = product.isAvailable === false;
-              const isOutOfStock = !isUnavailable && product.stock <= 0;
-              const isLowStock = !isUnavailable && !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
+              const isOutOfStock = !isUnavailable && availableStock <= 0;
+              const isSelected = isSearchFocused && index === selectedIndex;
 
               return (
                 <div
                   key={product.id}
-                  onClick={() => !isOutOfStock && !isUnavailable && onAddToCart(product)}
+                  ref={(el) => {
+                    cardRefs.current[index] = el;
+                  }}
+                  onMouseEnter={() => {
+                    if (isSearchFocused) {
+                      setSelectedIndex(index);
+                    }
+                  }}
+                  onClick={() => handleCardClick(product, isOutOfStock, isUnavailable)}
                   className={`group flex items-center justify-between p-2 rounded-xl border transition-all duration-150 ${
                     isUnavailable || isOutOfStock
                       ? 'bg-zinc-50 border-dashed border-zinc-200 opacity-50 cursor-not-allowed'
-                      : 'bg-white border-zinc-200 hover:border-[#FF5500] hover:bg-zinc-50/60 cursor-pointer active:scale-[0.99]'
+                      : isSelected
+                      ? 'bg-white border-zinc-300 shadow-xs cursor-pointer'
+                      : 'bg-white border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50/60 cursor-pointer active:scale-[0.99]'
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -107,26 +274,16 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                     {/* Product Name & Specs */}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <h4 className="text-xs font-bold text-zinc-900 truncate group-hover:text-[#FF5500] transition-colors">
+                        <h4 className="text-xs font-bold truncate text-zinc-900">
                           {product.name}
                         </h4>
                         {isUnavailable && (
-                          <span className="px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-700 text-[9px] font-bold">
+                          <span className="px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-700 text-[9px] font-bold shrink-0">
                             Unavailable
                           </span>
                         )}
-                        {isLowStock && (
-                          <span className="px-1.5 py-0.2 rounded bg-orange-100 text-[#FF5500] text-[9px] font-bold">
-                            {product.stock} left
-                          </span>
-                        )}
-                        {isOutOfStock && (
-                          <span className="px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-600 text-[9px] font-bold">
-                            Out
-                          </span>
-                        )}
                       </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+                      <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 mt-0.5">
                         <span className="font-medium text-zinc-500">{product.weight}</span>
                         <span>&bull;</span>
                         <span className="font-mono">{product.sku}</span>
@@ -134,15 +291,30 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Price & Add Action */}
-                  <div className="flex items-center gap-1.5 flex-shrink-0 pl-2">
-                    <span className="text-xs font-black text-black font-mono tabular-numbers">
-                      Rs. {product.price.toLocaleString('en-LK', { minimumFractionDigits: 2 })}
-                    </span>
+                  {/* Price, Stock Qty & Add Action */}
+                  <div className="flex items-center gap-2 flex-shrink-0 pl-2">
+                    <div className="text-right">
+                      <span className="text-xs font-black text-black font-mono tabular-numbers block leading-tight">
+                        Rs. {product.price.toLocaleString('en-LK', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span
+                        className={`text-[10px] font-mono block leading-tight mt-0.5 ${
+                          isOutOfStock ? 'text-rose-500 font-bold' : 'text-zinc-400 font-medium'
+                        }`}
+                      >
+                        {isOutOfStock ? 'Out of stock' : `Qty: ${availableStock}`}
+                      </span>
+                    </div>
 
                     {!isOutOfStock && (
-                      <div className="w-5 h-5 rounded-md bg-zinc-100 group-hover:bg-[#FF5500] group-hover:text-white text-zinc-600 flex items-center justify-center transition-colors">
-                        <Plus className="w-3 h-3" />
+                      <div
+                        className={`w-5 h-5 aspect-square rounded-md flex items-center justify-center transition-all shrink-0 ${
+                          isSelected
+                            ? 'bg-[#FF5500] text-white shadow-xs scale-105'
+                            : 'bg-zinc-100 group-hover:bg-zinc-200 text-zinc-600'
+                        }`}
+                      >
+                        <Plus className="w-3 h-3 stroke-[2.5]" />
                       </div>
                     )}
                   </div>
@@ -153,19 +325,32 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
         ) : (
           /* Minimal Compact 3-Column Grid View with Real Images */
           <div className="grid grid-cols-3 gap-1.5">
-            {products.map((product) => {
+            {products.map((product, index) => {
+              const inCartItem = cartItems.find((ci) => ci.product.id === product.id);
+              const inCartQty = inCartItem ? inCartItem.quantity : 0;
+              const availableStock = Math.max(0, product.stock - inCartQty);
               const isUnavailable = product.isAvailable === false;
-              const isOutOfStock = !isUnavailable && product.stock <= 0;
-              const isLowStock = !isUnavailable && !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
+              const isOutOfStock = !isUnavailable && availableStock <= 0;
+              const isSelected = isSearchFocused && index === selectedIndex;
 
               return (
                 <div
                   key={product.id}
-                  onClick={() => !isOutOfStock && !isUnavailable && onAddToCart(product)}
-                  className={`group p-1.5 rounded-xl border flex flex-col justify-between transition-all duration-150 select-none ${
+                  ref={(el) => {
+                    cardRefs.current[index] = el;
+                  }}
+                  onMouseEnter={() => {
+                    if (isSearchFocused) {
+                      setSelectedIndex(index);
+                    }
+                  }}
+                  onClick={() => handleCardClick(product, isOutOfStock, isUnavailable)}
+                  className={`group p-1.5 rounded-xl border flex flex-col justify-between transition-all duration-150 select-none relative ${
                     isUnavailable || isOutOfStock
                       ? 'bg-zinc-50 border-dashed border-zinc-200 opacity-50 cursor-not-allowed'
-                      : 'bg-white border-zinc-200 hover:border-[#FF5500] hover:shadow-xs cursor-pointer active:scale-[0.97]'
+                      : isSelected
+                      ? 'bg-white border-zinc-300 shadow-xs cursor-pointer'
+                      : 'bg-white border-zinc-200 hover:border-zinc-300 hover:shadow-xs cursor-pointer active:scale-[0.97]'
                   }`}
                 >
                   {/* Confectionery Thumbnail Image with Brand & Stock Badge */}
@@ -204,19 +389,22 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                         </span>
                       </div>
                     ) : null}
-                    {isLowStock && (
-                      <div className="absolute top-1 right-1">
-                        <span className="px-1 py-0.2 rounded bg-orange-100 text-[#FF5500] text-[8px] font-bold shadow-2xs">
-                          {product.stock} left
-                        </span>
-                      </div>
-                    )}
+
+                    {/* Stock Qty Count (Black Circle with White Bold Number at right top corner) */}
+                    <div className="absolute top-1 right-1 z-10">
+                      <span
+                        className="min-w-[20px] h-[20px] px-1 rounded-full bg-black text-white font-mono font-black text-[9px] flex items-center justify-center shadow-md border border-white/25 leading-none select-none"
+                        title={`Available Stock: ${availableStock} (Total: ${product.stock}, In Cart: ${inCartQty})`}
+                      >
+                        {availableStock}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Title & Weight */}
                   <div className="min-w-0">
                     <h4
-                      className="text-[11px] font-bold text-zinc-900 truncate leading-tight group-hover:text-[#FF5500] transition-colors"
+                      className="text-[11px] font-bold truncate leading-tight text-zinc-900 group-hover:text-zinc-900"
                       title={product.name}
                     >
                       {product.name}
@@ -232,8 +420,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                       Rs. {product.price.toLocaleString()}
                     </span>
                     {!isOutOfStock && (
-                      <div className="w-4 h-4 rounded bg-zinc-100 group-hover:bg-[#FF5500] group-hover:text-white text-zinc-500 flex items-center justify-center transition-colors">
-                        <Plus className="w-2.5 h-2.5 stroke-[2.5]" />
+                      <div
+                        className={`w-5 h-5 aspect-square rounded-md flex items-center justify-center transition-all shrink-0 ${
+                          isSelected
+                            ? 'bg-[#FF5500] text-white shadow-xs scale-105'
+                            : 'bg-zinc-100 group-hover:bg-zinc-200 text-zinc-600'
+                        }`}
+                      >
+                        <Plus className="w-3 h-3 stroke-[2.5]" />
                       </div>
                     )}
                   </div>

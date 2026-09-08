@@ -21,7 +21,55 @@ import {
   CheckCircle2,
   Ban,
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const parseBatchDate = (dateStr?: string): { year: number; month: number } | null => {
+  if (!dateStr || !dateStr.trim() || dateStr.trim().toUpperCase() === 'N/A') return null;
+
+  const clean = dateStr.trim();
+  const parts = clean.split(/\s+/);
+
+  // Pattern: "08 Sep 2026" or "8 September 2026"
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const mStr = parts[1].toLowerCase().slice(0, 3);
+    const year = parseInt(parts[2], 10);
+    const monthsMap: Record<string, number> = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+    if (!isNaN(day) && mStr in monthsMap && !isNaN(year)) {
+      return { year, month: monthsMap[mStr] };
+    }
+  }
+
+  // Try standard Date constructor
+  const parsed = new Date(clean);
+  if (!isNaN(parsed.getTime())) {
+    return { year: parsed.getFullYear(), month: parsed.getMonth() };
+  }
+
+  // Handle DD/MM/YYYY format
+  if (clean.includes('/')) {
+    const slashParts = clean.split('/');
+    if (slashParts.length === 3) {
+      const year = parseInt(slashParts[2], 10);
+      const month = parseInt(slashParts[1], 10) - 1;
+      if (!isNaN(year) && !isNaN(month) && month >= 0 && month <= 11) {
+        return { year, month };
+      }
+    }
+  }
+
+  return null;
+};
 
 interface ProductDetailsModalProps {
   isOpen: boolean;
@@ -40,11 +88,23 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
   const { sales } = useSales();
   const { returnRequests } = useReturns();
   const [imageError, setImageError] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
 
-  // Reset image error state when product changes
+  // Reset image error state and month selection when product or modal state changes
   React.useEffect(() => {
-    setImageError(false);
-  }, [product?.id]);
+    if (isOpen) {
+      setImageError(false);
+      setSelectedDate(new Date());
+    }
+  }, [isOpen, product?.id]);
+
+  const handlePrevMonth = () => {
+    setSelectedDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setSelectedDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
 
   // Calculate Product Sales & Returns
   const { totalSold, totalReturned, batchStatsMap } = useMemo(() => {
@@ -120,6 +180,38 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
     };
   }, [product, sales, returnRequests]);
 
+  // Filter batches by selected month & active carryover stock from previous months
+  // (Must be declared before any early return to obey React Rules of Hooks)
+  const filteredBatches = useMemo(() => {
+    if (!product || !product.batches) return [];
+
+    const targetYear = selectedDate.getFullYear();
+    const targetMonth = selectedDate.getMonth();
+
+    return product.batches.filter((batch) => {
+      const bDate = parseBatchDate(batch.receivedDate);
+      if (!bDate) {
+        // Fallback: show if active stock remains
+        return batch.quantityRemaining > 0;
+      }
+
+      // Check if received in a future month relative to selected month
+      const isFuture =
+        bDate.year > targetYear ||
+        (bDate.year === targetYear && bDate.month > targetMonth);
+      if (isFuture) return false;
+
+      // Check if received in the selected month
+      const isSelectedMonth =
+        bDate.year === targetYear && bDate.month === targetMonth;
+      if (isSelectedMonth) return true;
+
+      // Received in an earlier month:
+      // Show only if active stock still remains until stock runs out (batch get stok over)
+      return batch.quantityRemaining > 0;
+    });
+  }, [product, selectedDate]);
+
   if (!isOpen || !product) return null;
 
   const batches = product.batches || [];
@@ -136,11 +228,11 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
       onClose={onClose}
       title="Product Details & Multi-Supplier Inventory"
       maxWidth="6xl"
-      bodyClassName="p-4 sm:p-5"
+      bodyClassName="p-4 sm:p-5 flex flex-col overflow-hidden max-h-[88vh]"
     >
-      <div className="space-y-3 text-xs">
+      <div className="space-y-3 text-xs flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* Single Minimal Product & Metric Row */}
-        <div className="p-2.5 sm:p-3 bg-zinc-50/90 rounded-2xl border border-zinc-200/90 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2.5 sm:gap-3">
+        <div className="p-2.5 sm:p-3 bg-zinc-50/90 rounded-2xl border border-zinc-200/90 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2.5 sm:gap-3 flex-shrink-0">
           {/* Left: Product Thumbnail + Title + Meta Details */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             {product.imageUrl && !imageError ? (
@@ -247,7 +339,7 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
               <div className="px-2.5 py-1 rounded-xl bg-white border border-zinc-200 shadow-2xs flex items-center gap-1.5 flex-shrink-0">
                 <Building2 className="w-3.5 h-3.5 text-[#FF5500]" />
                 <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider hidden 2xl:inline">Suppliers</span>
-                <span className="font-bold text-zinc-800">{batches.length} active</span>
+                <span className="font-bold text-zinc-800">{filteredBatches.length} active</span>
               </div>
             </div>
 
@@ -261,15 +353,37 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
         </div>
 
         {/* Multi-Supplier Records (Clean Minimal Rows / Table) */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex items-center justify-between mb-2 flex-shrink-0">
             <h4 className="font-bold text-zinc-900 text-xs flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-[#FF5500]" />
-              <span>In-Stock Supplier Records &amp; Barcodes ({batches.length})</span>
+              <span>In-Stock Supplier Records &amp; Barcodes ({filteredBatches.length})</span>
             </h4>
-            <span className="text-[10px] text-zinc-400 font-medium">
-              Sorted by active inventory batches
-            </span>
+
+            {/* Fixed-Width Month Picker Capsule */}
+            <div className="w-[175px] h-7 bg-black text-white rounded-full px-2 flex items-center justify-between shadow-sm select-none flex-shrink-0">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="w-5 h-5 flex items-center justify-center text-zinc-400 hover:text-white rounded-full hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
+                title="Previous Month"
+                aria-label="Previous Month"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="flex-1 text-center font-bold text-xs text-white whitespace-nowrap">
+                {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getFullYear()}
+              </span>
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="w-5 h-5 flex items-center justify-center text-zinc-400 hover:text-white rounded-full hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
+                title="Next Month"
+                aria-label="Next Month"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           {batches.length === 0 ? (
@@ -305,95 +419,111 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
               </button>
             </div>
           ) : (
-            <div className="border border-zinc-200/90 rounded-xl overflow-hidden bg-white shadow-2xs">
+            <div className="border border-zinc-200/90 rounded-xl overflow-hidden bg-white shadow-2xs flex-1 min-h-0 flex flex-col">
               {/* Desktop & Tablet Table View (Guaranteed No Overlapping with min-w-[880px]) */}
-              <div className="overflow-x-auto max-h-[440px] overflow-y-auto">
+              <div className="overflow-x-auto overflow-y-auto max-h-[360px] flex-1">
                 <table className="w-full text-left border-collapse min-w-[880px]">
                   <thead className="sticky top-0 z-10 bg-zinc-50 border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
                     <tr>
-                      <th className="py-2.5 px-3.5 min-w-[200px]">Supplier</th>
-                      <th className="py-2.5 px-3 min-w-[170px]">Restock &amp; Expiry</th>
-                      <th className="py-2.5 px-3 text-center min-w-[125px]" title="Current Stock / Returns / Total Supplied">Stock</th>
-                      <th className="py-2.5 px-3 min-w-[160px]">Cost &amp; Selling</th>
-                      <th className="py-2.5 px-3.5 text-right min-w-[180px]">Barcode</th>
+                      <th className="py-2.5 px-3.5 min-w-[200px] bg-zinc-50">Supplier</th>
+                      <th className="py-2.5 px-3 min-w-[170px] bg-zinc-50">Restock &amp; Expiry</th>
+                      <th className="py-2.5 px-3 text-center min-w-[125px] bg-zinc-50" title="Current Stock / Returns / Total Supplied">Stock</th>
+                      <th className="py-2.5 px-3 min-w-[160px] bg-zinc-50">Cost &amp; Selling</th>
+                      <th className="py-2.5 px-3.5 text-right min-w-[180px] bg-zinc-50">Barcode</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 text-xs">
-                    {batches.map((batch) => {
-                      const stats = batchStatsMap.get(batch.id) || { sold: 0, returned: 0 };
-                      const barcodeValue = product.barcode || batch.batchNumber;
+                    {filteredBatches.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-zinc-400">
+                          <div className="flex flex-col items-center justify-center gap-1.5">
+                            <Calendar className="w-5 h-5 text-zinc-300" />
+                            <p className="text-xs font-semibold text-zinc-600">
+                              No records found for {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getFullYear()}
+                            </p>
+                            <p className="text-[11px] text-zinc-400">
+                              Batches restocked in this month or with active stock carried over will appear here.
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredBatches.map((batch) => {
+                        const stats = batchStatsMap.get(batch.id) || { sold: 0, returned: 0 };
+                        const barcodeValue = batch.batchNumber || product.barcode;
 
-                      return (
-                        <tr
-                          key={batch.id}
-                          className="hover:bg-orange-50/20 transition-colors h-10"
-                        >
-                          {/* 1. Supplier Name (Single Line, No Supplier ID / Lot Pill, No Profile Icon) */}
-                          <td className="py-2 px-3.5 whitespace-nowrap min-w-[200px]">
-                            <span
-                              className="font-bold text-zinc-900 text-xs truncate block max-w-[240px]"
-                              title={batch.supplierName}
-                            >
-                              {batch.supplierName}
-                            </span>
-                          </td>
-
-                          {/* 2. Restock Date & Expiry Date (Single Line) */}
-                          <td className="py-2 px-3 whitespace-nowrap min-w-[170px]">
-                            <div className="flex items-center gap-1.5 text-[11px] text-zinc-600">
-                              <span className="flex items-center gap-1 font-medium">
-                                <Calendar className="w-3 h-3 text-zinc-400" />
-                                {batch.receivedDate}
+                        return (
+                          <tr
+                            key={batch.id}
+                            className="hover:bg-orange-50/20 transition-colors h-10"
+                          >
+                            {/* 1. Supplier Name */}
+                            <td className="py-2 px-3.5 whitespace-nowrap min-w-[200px]">
+                              <span
+                                className="font-bold text-zinc-900 text-xs truncate block max-w-[240px]"
+                                title={batch.supplierName}
+                              >
+                                {batch.supplierName}
                               </span>
-                              <span className="text-zinc-300">•</span>
-                              {batch.expiryDate ? (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
-                                  <Clock className="w-2.5 h-2.5 text-amber-600" />
-                                  Exp: {batch.expiryDate}
+                            </td>
+
+                            {/* 2. Restock Date & Expiry Date */}
+                            <td className="py-2 px-3 whitespace-nowrap min-w-[170px]">
+                              <div className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+                                <span className="flex items-center gap-1 font-medium">
+                                  <Calendar className="w-3 h-3 text-zinc-400" />
+                                  {batch.receivedDate}
                                 </span>
-                              ) : (
-                                <span className="text-[10px] text-zinc-400">No Exp</span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* 3. Stock: Current / Returned / Total Supplied */}
-                          <td className="py-2 px-3 text-center whitespace-nowrap min-w-[125px]">
-                            <span
-                              className="font-mono text-xs inline-flex items-center justify-center"
-                              title={`Current: ${batch.quantityRemaining} | Returned: ${stats.returned} | Total Supplied: ${batch.quantityReceived}`}
-                            >
-                              <strong className="text-emerald-600 font-bold">{batch.quantityRemaining}</strong>
-                              <span className="text-zinc-300 mx-1">/</span>
-                              <strong className={stats.returned > 0 ? "text-rose-600 font-bold" : "text-zinc-400 font-bold"}>
-                                {stats.returned}
-                              </strong>
-                              <span className="text-zinc-300 mx-1">/</span>
-                              <span className="text-zinc-700 font-semibold">{batch.quantityReceived}</span>
-                            </span>
-                          </td>
-
-                          {/* 4. Cost Price & Selling Price (Single Line, Generous Spacing) */}
-                          <td className="py-2 px-3 whitespace-nowrap font-mono text-[11px] min-w-[160px]">
-                            <span className="text-zinc-400">Cost:</span> <strong className="text-zinc-700">Rs. {batch.costPrice.toLocaleString('en-LK')}</strong>
-                            <span className="text-zinc-300 mx-1.5">•</span>
-                            <span className="text-zinc-400">Sale:</span> <strong className="text-[#FF5500] font-bold">Rs. {batch.sellingPrice.toLocaleString('en-LK')}</strong>
-                          </td>
-
-                          {/* 5. Barcode & Mini Scan (Single Line) */}
-                          <td className="py-2 px-3.5 text-right whitespace-nowrap min-w-[180px]">
-                            <div className="flex items-center justify-end gap-2">
-                              <span className="font-mono text-[10px] font-bold text-zinc-600">
-                                {barcodeValue}
-                              </span>
-                              <div className="bg-zinc-50 px-1 py-0.5 rounded border border-zinc-200 inline-flex flex-shrink-0">
-                                <Code39Barcode value={barcodeValue} height={16} showText={false} />
+                                <span className="text-zinc-300">•</span>
+                                {batch.expiryDate ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                                    <Clock className="w-2.5 h-2.5 text-amber-600" />
+                                    Exp: {batch.expiryDate}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-zinc-400">No Exp</span>
+                                )}
                               </div>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+
+                            {/* 3. Stock: Current / Returned / Total Supplied */}
+                            <td className="py-2 px-3 text-center whitespace-nowrap min-w-[125px]">
+                              <span
+                                className="font-mono text-xs inline-flex items-center justify-center"
+                                title={`Current: ${batch.quantityRemaining} | Returned: ${stats.returned} | Total Supplied: ${batch.quantityReceived}`}
+                              >
+                                <strong className="text-emerald-600 font-bold">{batch.quantityRemaining}</strong>
+                                <span className="text-zinc-300 mx-1">/</span>
+                                <strong className={stats.returned > 0 ? "text-rose-600 font-bold" : "text-zinc-400 font-bold"}>
+                                  {stats.returned}
+                                </strong>
+                                <span className="text-zinc-300 mx-1">/</span>
+                                <span className="text-zinc-700 font-semibold">{batch.quantityReceived}</span>
+                              </span>
+                            </td>
+
+                            {/* 4. Cost Price & Selling Price */}
+                            <td className="py-2 px-3 whitespace-nowrap font-mono text-[11px] min-w-[160px]">
+                              <span className="text-zinc-400">Cost:</span> <strong className="text-zinc-700">Rs. {batch.costPrice.toLocaleString('en-LK')}</strong>
+                              <span className="text-zinc-300 mx-1.5">•</span>
+                              <span className="text-zinc-400">Sale:</span> <strong className="text-[#FF5500] font-bold">Rs. {batch.sellingPrice.toLocaleString('en-LK')}</strong>
+                            </td>
+
+                            {/* 5. Barcode & Mini Scan */}
+                            <td className="py-2 px-3.5 text-right whitespace-nowrap min-w-[180px]">
+                              <div className="flex items-center justify-end gap-2">
+                                <span className="font-mono text-[10px] font-bold text-zinc-600">
+                                  {barcodeValue}
+                                </span>
+                                <div className="bg-zinc-50 px-1 py-0.5 rounded border border-zinc-200 inline-flex flex-shrink-0">
+                                  <Code39Barcode value={barcodeValue} height={16} showText={false} />
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -402,43 +532,14 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="pt-2 flex items-center justify-between border-t border-zinc-200/80">
-          <div className="flex items-center gap-2">
-            {onEdit ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onEdit(product);
-                }}
-                className="px-3 py-1.5 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50 transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <Pencil className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Edit Product</span>
-              </button>
-            ) : null}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3.5 py-1.5 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-600 hover:bg-zinc-50 transition-colors cursor-pointer"
-            >
-              Close
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                navigate(`/admin/restock?productId=${product.id}`);
-              }}
-              className="px-4 py-1.5 rounded-xl bg-[#FF5500] hover:bg-[#e04b00] active:scale-95 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Restock Supplier Batch</span>
-            </button>
-          </div>
+        <div className="pt-2.5 flex items-center justify-end border-t border-zinc-200/80 flex-shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors cursor-pointer"
+          >
+            Close
+          </button>
         </div>
       </div>
     </Modal>

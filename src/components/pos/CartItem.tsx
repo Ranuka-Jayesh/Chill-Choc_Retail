@@ -4,7 +4,6 @@ import {
   Minus,
   Plus,
   MoreVertical,
-  UserPlus,
   Percent,
   FileText,
   Trash2,
@@ -17,7 +16,7 @@ interface CartItemProps {
   onSelect?: () => void;
   onUpdateQuantity: (id: string, qty: number) => void;
   onOpenQuantityModal: (item: CartItemType) => void;
-  onOpenSalespersonModal: (item: CartItemType) => void;
+  onOpenSalespersonModal?: (item: CartItemType) => void;
   onOpenItemDiscountModal: (item: CartItemType) => void;
   onOpenItemNoteModal: (item: CartItemType) => void;
   onRemoveItem: (item: CartItemType) => void;
@@ -72,8 +71,8 @@ export const CartItem: React.FC<CartItemProps> = ({
           : 'bg-white hover:bg-zinc-50/70 border-l-transparent'
       }`}
     >
-      {/* Column 1: Product Name, Weight, Unit Price & Salesperson (flex-1) */}
-      <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden pr-2">
+      {/* Column 1: Product Name, Weight, Supplier Breakdown & Salesperson (flex-1) */}
+      <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden pr-2 flex-wrap sm:flex-nowrap">
         {/* Product Title */}
         <h4 className="text-xs font-bold text-zinc-900 truncate leading-none">
           {item.product.name}
@@ -84,19 +83,22 @@ export const CartItem: React.FC<CartItemProps> = ({
           ({item.product.weight})
         </span>
 
-        {/* Unit Price */}
-        <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap leading-none hidden sm:inline">
-          @ {item.unitPrice.toLocaleString()}
-        </span>
-
-        {/* Salesperson Badge (Only when assigned, no +TM button in record) */}
-        {item.salesperson && (
+        {/* Supplier Batch Breakdown (clean text without background or dot) */}
+        {item.batchAllocations && item.batchAllocations.length > 0 && (
           <span
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold whitespace-nowrap bg-orange-50 text-[#FF5500] border border-orange-200"
-            title={`Assigned to ${item.salesperson.name}`}
+            className="text-[10px] text-zinc-500 font-medium whitespace-nowrap leading-none truncate max-w-[180px]"
+            title={`Supplier batches:\n${item.batchAllocations
+              .map((a) => `• ${a.supplierName} [${a.batchNumber}]: ${a.quantity} unit(s)`)
+              .join('\n')}`}
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-[#FF5500]" />
-            <span>{item.salesperson.name.split(' ')[0]}</span>
+            {item.batchAllocations
+              .map((a) => {
+                const shortSupplier = a.supplierName
+                  .replace(/(PLC|Wholesale|Ltd|Pvt Ltd|Corporation|Inc\.)/gi, '')
+                  .trim();
+                return `${shortSupplier} (${a.quantity}x)`;
+              })
+              .join(' • ')}
           </span>
         )}
 
@@ -115,10 +117,10 @@ export const CartItem: React.FC<CartItemProps> = ({
               onSelect?.();
               onOpenItemNoteModal(item);
             }}
-            className="text-[10px] text-zinc-400 hover:text-[#FF5500] cursor-pointer whitespace-nowrap leading-none"
+            className="inline-flex items-center text-zinc-400 hover:text-[#FF5500] cursor-pointer whitespace-nowrap leading-none transition-colors"
             title={`Note: ${item.note}`}
           >
-            📝
+            <FileText className="w-3 h-3" />
           </span>
         )}
       </div>
@@ -195,18 +197,6 @@ export const CartItem: React.FC<CartItemProps> = ({
 
           {isMenuOpen && (
             <div className="absolute right-0 top-7 z-40 w-36 bg-white rounded-xl shadow-xl border border-zinc-200 py-1 text-xs text-zinc-900 animate-in fade-in zoom-in-95 duration-100">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsMenuOpen(false);
-                  onOpenSalespersonModal(item);
-                }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-zinc-50 text-left font-medium"
-              >
-                <UserPlus className="w-3.5 h-3.5 text-black" />
-                <span>Salesperson</span>
-              </button>
-
               <button
                 onClick={(e) => {
                   e.stopPropagation();

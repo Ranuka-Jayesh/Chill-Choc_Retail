@@ -41,7 +41,7 @@
     min-width: 80mm !important;
     height: auto !important;
     margin: 0 !important;
-    padding: 0 1.5mm 4mm 1.5mm !important;
+    padding: 0 0 4mm 0 !important;
     box-sizing: border-box !important;
     background-color: #ffffff !important;
     overflow: visible !important;
@@ -52,6 +52,20 @@
   #print-mount * {
     visibility: visible !important;
     box-sizing: border-box !important;
+  }
+
+  /* Thermal print clarity: solid pure black and micro-stroke to prevent gray dithering */
+  #print-mount,
+  #print-mount * {
+    color: #000000 !important;
+    text-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .thermal-receipt-root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    text-rendering: geometricPrecision !important;
   }
 
   /* Ensure continuous roll flow without arbitrary page splits */
@@ -75,9 +89,8 @@
 }
 
 .receipt-item-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: block;
+  width: 100%;
   box-sizing: border-box;
   max-width: 100%;
   page-break-inside: avoid;

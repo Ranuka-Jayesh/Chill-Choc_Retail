@@ -6,6 +6,7 @@ import { useProducts } from '@/stores/productStore';
 import { useCart } from '@/stores/cartStore';
 import { useCashier } from '@/stores/cashierStore';
 import { useSales } from '@/stores/salesStore';
+import { useSuppliers } from '@/stores/supplierStore';
 import { useToast } from '@/stores/toastStore';
 import { usePosShortcuts } from '@/hooks/usePosShortcuts';
 import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
@@ -31,10 +32,15 @@ import { HeldBillsModal } from '@/components/modals/HeldBillsModal';
 import { KeyboardHelpModal } from '@/components/modals/KeyboardHelpModal';
 import { ItemNoteModal } from '@/components/modals/ItemNoteModal';
 import { SalespersonReportModal } from '@/components/modals/SalespersonReportModal';
+import { SupplierSelectModal, getProductSupplierOptions, ProductSupplierOption, ProductBatchOption } from '@/components/modals/SupplierSelectModal';
+import { SupplierStockOverModal, StockOverData } from '@/components/modals/SupplierStockOverModal';
+import { ProductExpiredModal, ExpiredProductData } from '@/components/modals/ProductExpiredModal';
+import { isBatchExpired, getProductStockExpiryStatus } from '@/stores/productStore';
 
 export const PosScreen: React.FC = () => {
   const navigate = useNavigate();
-  const { products } = useProducts();
+  const { products, deductStock } = useProducts();
+  const { suppliers: allSuppliers } = useSuppliers();
   const { cashier, lockPOS } = useCashier();
   const {
     items,
@@ -62,6 +68,8 @@ export const PosScreen: React.FC = () => {
     assignSalesperson,
     showClearConfirm,
     setShowClearConfirm,
+    stockOverData,
+    setStockOverData,
   } = useCart();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -73,16 +81,39 @@ export const PosScreen: React.FC = () => {
   useEffect(() => {
     if (addBarcodeParam) {
       const clean = addBarcodeParam.replace(/^\*+|\*+$/g, '').trim();
-      const matched =
-        products.find((p) => p.barcode === clean) ||
-        products.find((p) => p.sku.toLowerCase() === clean.toLowerCase());
+      let matchedBatchNumber: string | null = null;
+      let matched = products.find((p) =>
+        p.batches?.some((b) => {
+          if (b.batchNumber.toLowerCase() === clean.toLowerCase()) {
+            matchedBatchNumber = b.batchNumber;
+            return true;
+          }
+          return false;
+        })
+      );
+      if (!matched) {
+        matched =
+          products.find((p) => p.barcode === clean) ||
+          products.find((p) => p.sku.toLowerCase() === clean.toLowerCase());
+      }
       if (matched) {
-        addItem(matched);
-        showToast(`Added ${matched.name} to bill`, 'success');
+        if (
+          (matched.expiryDate && isBatchExpired(matched.expiryDate)) ||
+          (matched.batches && matched.batches.length === 1 && isBatchExpired(matched.batches[0].expiryDate))
+        ) {
+          setExpiredProductData({
+            product: matched,
+            expiryDate: matched.expiryDate || matched.batches?.[0]?.expiryDate,
+            batchNumber: matchedBatchNumber || matched.batches?.[0]?.batchNumber,
+            supplierName: matched.batches?.[0]?.supplierName,
+          });
+        } else {
+          addItem(matched, 1, null, matchedBatchNumber);
+        }
       }
       setSearchParams({}, { replace: true });
     }
-  }, [addBarcodeParam, addItem, setSearchParams, showToast]);
+  }, [addBarcodeParam, addItem, setSearchParams, products]);
 
   // Search & Filtering State
   const [searchQuery, setSearchQuery] = useState('');
@@ -101,6 +132,13 @@ export const PosScreen: React.FC = () => {
   const [isSalespersonModalOpen, setIsSalespersonModalOpen] = useState(false);
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false);
   const [isRepReportOpen, setIsRepReportOpen] = useState(false);
+  const [expiredProductData, setExpiredProductData] = useState<ExpiredProductData | null>(null);
+  const [supplierSelectData, setSupplierSelectData] = useState<{
+    product: Product;
+    options: ProductSupplierOption[];
+    initialStep?: 'supplier' | 'batch';
+    initialSupplier?: ProductSupplierOption | null;
+  } | null>(null);
 
   // Selected item modal state
   const [targetItemForSalesperson, setTargetItemForSalesperson] = useState<CartItemType | null>(null);
@@ -121,7 +159,9 @@ export const PosScreen: React.FC = () => {
       !isSuccessOpen &&
       !isReceiptOpen &&
       !isHoldBillOpen &&
-      !isCashMovementOpen,
+      !isCashMovementOpen &&
+      !supplierSelectData &&
+      !stockOverData,
     onScan: (scannedCode) => {
       // 1. Clean any Code 39 start/stop asterisks and whitespace
       const cleanCode = scannedCode.replace(/^\*+|\*+$/g, '').trim();
@@ -148,15 +188,72 @@ export const PosScreen: React.FC = () => {
         return;
       }
 
-      // 3. Check if this is a Product Barcode
-      const matchedProduct =
-        products.find((p) => p.barcode === cleanCode) ||
-        products.find((p) => p.sku.toLowerCase() === cleanCode.toLowerCase()) ||
-        products.find((p) => p.name.toLowerCase() === cleanCode.toLowerCase());
+      // 3. Check if this is a Batch Barcode (specific supplier batch) or Product Barcode
+      let matchedProduct: Product | undefined;
+      let matchedBatchNumber: string | null = null;
+      let matchedSupplierName: string | null = null;
+
+      // Check batch barcodes across all products first
+      for (const p of products) {
+        const batch = p.batches?.find(
+          (b) => b.batchNumber.toLowerCase() === cleanCode.toLowerCase()
+        );
+        if (batch) {
+          if (isBatchExpired(batch.expiryDate)) {
+            setExpiredProductData({
+              product: p,
+              batchNumber: batch.batchNumber,
+              expiryDate: batch.expiryDate,
+              supplierName: batch.supplierName,
+            });
+            return;
+          }
+          matchedProduct = p;
+          matchedBatchNumber = batch.batchNumber;
+          matchedSupplierName = batch.supplierName;
+          break;
+        }
+      }
+
+      // If not matched by batch barcode, check standard product barcode, SKU, or exact name
+      if (!matchedProduct) {
+        matchedProduct =
+          products.find((p) => p.barcode === cleanCode) ||
+          products.find((p) => p.sku.toLowerCase() === cleanCode.toLowerCase()) ||
+          products.find((p) => p.name.toLowerCase() === cleanCode.toLowerCase());
+      }
 
       if (matchedProduct) {
-        addItem(matchedProduct);
-        showToast(`Added ${matchedProduct.name} (Rs. ${matchedProduct.price.toLocaleString()})`, 'success');
+        if (
+          matchedProduct.batches &&
+          matchedProduct.batches.length === 1 &&
+          isBatchExpired(matchedProduct.batches[0].expiryDate)
+        ) {
+          setExpiredProductData({
+            product: matchedProduct,
+            batchNumber: matchedProduct.batches[0].batchNumber,
+            expiryDate: matchedProduct.batches[0].expiryDate,
+            supplierName: matchedProduct.batches[0].supplierName,
+          });
+          return;
+        }
+        if (matchedProduct.expiryDate && isBatchExpired(matchedProduct.expiryDate)) {
+          setExpiredProductData({
+            product: matchedProduct,
+            expiryDate: matchedProduct.expiryDate,
+          });
+          return;
+        }
+        const status = getProductStockExpiryStatus(matchedProduct);
+        if (status.isAllExpired) {
+          setExpiredProductData({
+            product: matchedProduct,
+            expiryDate: matchedProduct.expiryDate || matchedProduct.batches?.[0]?.expiryDate,
+          });
+          return;
+        }
+
+        addItem(matchedProduct, 1, null, matchedBatchNumber);
         return;
       }
 
@@ -179,6 +276,7 @@ export const PosScreen: React.FC = () => {
         product.name.toLowerCase().includes(query) ||
         product.sku.toLowerCase().includes(query) ||
         product.barcode.includes(query) ||
+        product.batches?.some((b) => b.batchNumber.toLowerCase().includes(query)) ||
         (product.brand && product.brand.toLowerCase().includes(query))
       );
     });
@@ -433,6 +531,14 @@ export const PosScreen: React.FC = () => {
       setIsHelpOpen(true);
     },
     onEscape: () => {
+      if (stockOverData) {
+        setStockOverData(null);
+        return;
+      }
+      if (supplierSelectData) {
+        setSupplierSelectData(null);
+        return;
+      }
       if (itemPendingRemoval) {
         setItemPendingRemoval(null);
         return;
@@ -466,9 +572,185 @@ export const PosScreen: React.FC = () => {
   });
 
   const handlePaymentSuccess = (sale: CompletedSale) => {
+    // Deduct stock per supplier batch allocation, with FIFO fallback
+    deductStock(
+      sale.items.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        batchAllocations: item.batchAllocations,
+      }))
+    );
     setCurrentSuccessSale(sale);
     setIsSuccessOpen(true);
     clearCart();
+  };
+
+  const handleManualAddToCart = (product: Product) => {
+    // Check if the product itself or its single batch is expired
+    if (
+      (product.expiryDate && isBatchExpired(product.expiryDate)) ||
+      (product.batches && product.batches.length === 1 && isBatchExpired(product.batches[0].expiryDate)) ||
+      getProductStockExpiryStatus(product).isAllExpired
+    ) {
+      setExpiredProductData({
+        product,
+        expiryDate: product.expiryDate || product.batches?.[0]?.expiryDate,
+        batchNumber: product.batches?.[0]?.batchNumber,
+        supplierName: product.batches?.[0]?.supplierName,
+      });
+      return;
+    }
+
+    const supplierOptions = getProductSupplierOptions(product, allSuppliers, items);
+    
+    // Check if all options are stock over
+    const availableOptions = supplierOptions.filter((o) => !o.isStockOver);
+    if (supplierOptions.length > 0 && availableOptions.length === 0) {
+      setStockOverData({
+        product,
+        exceededSupplier: supplierOptions[0],
+        availableBatches: [],
+        availableSuppliers: [],
+      });
+      return;
+    }
+
+    // If product has more than 1 supplier, prompt cashier to select supplier
+    if (supplierOptions.length > 1) {
+      setSupplierSelectData({
+        product,
+        options: supplierOptions,
+        initialStep: 'supplier',
+      });
+      return;
+    }
+
+    // Single supplier
+    const firstOption = supplierOptions[0];
+    if (firstOption) {
+      // If that single supplier has more than 1 batch, open batch selection!
+      if (firstOption.batches && firstOption.batches.length > 1) {
+        setSupplierSelectData({
+          product,
+          options: supplierOptions,
+          initialStep: 'batch',
+          initialSupplier: firstOption,
+        });
+        return;
+      }
+
+      // Single batch
+      if (firstOption.isStockOver) {
+        setStockOverData({
+          product,
+          exceededSupplier: firstOption,
+          availableBatches: [],
+          availableSuppliers: [],
+        });
+        return;
+      }
+
+      addItem(product, 1, null, firstOption.batchNumber, firstOption.supplierId);
+    }
+  };
+
+  const handleSupplierSelected = (
+    option: ProductSupplierOption,
+    selectedBatch?: ProductBatchOption | null
+  ) => {
+    if (!supplierSelectData) return;
+    const { product } = supplierSelectData;
+
+    // Check if selected batch is expired
+    if (selectedBatch && isBatchExpired(selectedBatch.expiryDate)) {
+      setSupplierSelectData(null);
+      setExpiredProductData({
+        product,
+        batchNumber: selectedBatch.batchNumber,
+        expiryDate: selectedBatch.expiryDate,
+        supplierName: selectedBatch.supplierName || option.supplierName,
+      });
+      return;
+    }
+
+    const batchNumber = selectedBatch?.batchNumber || option.batchNumber;
+    const supplierId = selectedBatch?.supplierId || option.supplierId;
+
+    addItem(product, 1, null, batchNumber, supplierId);
+    setSupplierSelectData(null);
+  };
+
+  const handleSupplierStockOver = (
+    exceededOption: ProductSupplierOption,
+    availableOptions: ProductSupplierOption[],
+    exceededBatch?: ProductBatchOption | null,
+    availableBatches?: ProductBatchOption[]
+  ) => {
+    if (!supplierSelectData) return;
+    const { product } = supplierSelectData;
+    setSupplierSelectData(null);
+    setStockOverData({
+      product,
+      exceededSupplier: exceededOption,
+      exceededBatch: exceededBatch || null,
+      availableBatches: availableBatches || [],
+      availableSuppliers: availableOptions,
+    });
+  };
+
+  const handleSelectAvailableBatch = (
+    batch: ProductBatchOption | any,
+    supplier: ProductSupplierOption
+  ) => {
+    if (!stockOverData) return;
+    const { product } = stockOverData;
+
+    if (isBatchExpired(batch.expiryDate)) {
+      setStockOverData(null);
+      setExpiredProductData({
+        product,
+        batchNumber: batch.batchNumber,
+        expiryDate: batch.expiryDate,
+        supplierName: supplier.supplierName,
+      });
+      return;
+    }
+
+    addItem(product, 1, null, batch.batchNumber, supplier.supplierId);
+    setStockOverData(null);
+  };
+
+  const handleSelectAvailableSupplier = (option: ProductSupplierOption) => {
+    if (!stockOverData) return;
+    const { product } = stockOverData;
+
+    // If the selected supplier has more than 1 batch, open batch selection!
+    if (option.batches && option.batches.length > 1) {
+      const allOptions = getProductSupplierOptions(product, allSuppliers, items);
+      setStockOverData(null);
+      setSupplierSelectData({
+        product,
+        options: allOptions,
+        initialStep: 'batch',
+        initialSupplier: option,
+      });
+      return;
+    }
+
+    addItem(product, 1, null, option.batchNumber, option.supplierId);
+    setStockOverData(null);
+  };
+
+  const handleChooseDifferentSupplier = () => {
+    if (!stockOverData) return;
+    const { product } = stockOverData;
+    const allOptions = getProductSupplierOptions(product, allSuppliers, items);
+    setStockOverData(null);
+    setSupplierSelectData({
+      product,
+      options: allOptions,
+      initialStep: 'supplier',
+    });
   };
 
   const handleNewSale = () => {
@@ -550,10 +832,9 @@ export const PosScreen: React.FC = () => {
             categoryCounts={categoryCounts}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            onAddToCart={(product) => {
-              addItem(product);
-            }}
+            onAddToCart={handleManualAddToCart}
             searchInputRef={searchInputRef}
+            onProductExpired={setExpiredProductData}
           />
         </section>
 
@@ -739,6 +1020,34 @@ export const PosScreen: React.FC = () => {
       <SalespersonReportModal
         isOpen={isRepReportOpen}
         onClose={() => setIsRepReportOpen(false)}
+      />
+
+      <SupplierSelectModal
+        isOpen={!!supplierSelectData}
+        onClose={() => setSupplierSelectData(null)}
+        product={supplierSelectData?.product || null}
+        options={supplierSelectData?.options || []}
+        cartItems={items}
+        initialStep={supplierSelectData?.initialStep}
+        initialSupplier={supplierSelectData?.initialSupplier}
+        onSelectSupplier={handleSupplierSelected}
+        onSupplierStockOver={handleSupplierStockOver}
+      />
+
+      <SupplierStockOverModal
+        isOpen={!!stockOverData}
+        onClose={() => setStockOverData(null)}
+        data={stockOverData}
+        onConfirm={handleChooseDifferentSupplier}
+        onSelectAvailableBatch={handleSelectAvailableBatch}
+        onSelectAvailableSupplier={handleSelectAvailableSupplier}
+        onChooseDifferentSupplier={handleChooseDifferentSupplier}
+      />
+
+      <ProductExpiredModal
+        isOpen={!!expiredProductData}
+        onClose={() => setExpiredProductData(null)}
+        data={expiredProductData}
       />
     </div>
   );

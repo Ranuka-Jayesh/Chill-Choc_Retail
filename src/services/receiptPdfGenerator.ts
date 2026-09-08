@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { CompletedSale } from '@/types';
@@ -46,18 +47,23 @@ export function measureRenderedReceiptHeightMm(): number | undefined {
  */
 export function calculateReceiptPdfHeightMm(sale: CompletedSale, isCompact = false): number {
   let y = 3.0; // Top padding
-  const logoSize = isCompact ? 16 : 25.4;
+  const logoSize = isCompact ? 24 : 43;
   y += logoSize + 1.5;
   y += 2.8 + 3.5 + 3.5; // Address, Tel, Divider
   y += 3.6 + 3.0 + 3.0; // Invoice header, Date, Cashier
   if (sale.customer?.name) y += 3.0;
   y += 3.2 + 3.4; // Divider, Items header
-  y += sale.items.length * 4.2; // Line items
+  sale.items.forEach((item) => {
+    y += 4.2; // Main line item
+    if (item.quantity > 1 || item.discount) {
+      y += 3.2; // Second line (@ unit price / discount)
+    }
+  });
   y += 3.2 + 3.2; // Divider, Subtotal
   if (sale.discountTotal > 0) y += 3.2;
   y += 3.5 + 4.0 + 3.2; // Divider, Total, Divider
   y += 3.0 + 3.0 + 3.5 + 3.2; // Payment method, Cash, Change, Divider
-  y += 2.8 + 3.2 + 11.5 + 3.5; // Thank you, Barcode, Divider
+  y += 2.8 + 3.2 + 9.5 + 3.5; // Thank you, Barcode (without text), Divider
   y += 2.8 + 3.5; // Footer attribution
   y += 3.5; // Bottom clearance
   return Math.ceil(y);
@@ -94,7 +100,7 @@ export async function createReceiptPdfDoc(
   container.style.top = '0px';
   container.style.width = `${paperWidth}mm`;
   container.style.maxWidth = `${paperWidth}mm`;
-  container.style.padding = '0 1.5mm 4mm 1.5mm';
+  container.style.padding = '0 0 4mm 0';
   container.style.boxSizing = 'border-box';
   container.style.background = '#ffffff';
   container.style.margin = '0';
@@ -103,27 +109,25 @@ export async function createReceiptPdfDoc(
   container.style.pointerEvents = 'none';
   document.body.appendChild(container);
 
-  // 2. Render the exact ThermalReceiptContent component with isPrintMode=true
+  // 2. Render the exact ThermalReceiptContent component synchronously with isPrintMode=true
   const root = createRoot(container);
-  root.render(
-    React.createElement(ThermalReceiptContent, {
-      sale,
-      paperWidth,
-      isPrintMode: true,
-    })
-  );
+  flushSync(() => {
+    root.render(
+      React.createElement(ThermalReceiptContent, {
+        sale,
+        paperWidth,
+        isPrintMode: true,
+      })
+    );
+  });
 
   try {
-    // 3. Wait for React 19 to commit DOM layout
+    // 3. Fast-path: wait a single frame for layout and styles to settle
     await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setTimeout(resolve, 60);
-        });
-      });
+      requestAnimationFrame(() => resolve());
     });
 
-    // 4. Ensure all document fonts (e.g. Plus Jakarta Sans) are fully loaded
+    // 4. Ensure document fonts are ready (cached after first run)
     if (document.fonts && document.fonts.ready) {
       try {
         await document.fonts.ready;
@@ -132,53 +136,53 @@ export async function createReceiptPdfDoc(
       }
     }
 
-    // 5. Ensure logo and all images are fully loaded and decoded
+    // 5. Ensure all images are decoded (in-memory data URIs decode immediately)
     const images = Array.from(container.querySelectorAll('img'));
-    await Promise.all(
-      images.map(async (img) => {
-        if (!img.complete) {
+    if (images.length > 0) {
+      await Promise.all(
+        images.map(async (img) => {
+          if (img.complete) return;
           await new Promise<void>((resolve) => {
             img.onload = () => resolve();
             img.onerror = () => resolve();
-            setTimeout(resolve, 800);
+            setTimeout(resolve, 200);
           });
-        }
-        if (img.decode) {
-          try {
-            await img.decode();
-          } catch {
-            // Fallback continues
-          }
-        }
-      })
-    );
+        })
+      );
+    }
 
-    // 6. Capture element at scale: 2 (supersampling for sharp 203 DPI thermal printheads)
+    // 6. Thermal rasterization: scale: 2.0 matches ~203 DPI thermal printheads
+    // Constrain windowWidth and windowHeight to avoid scanning full 1920x1080 viewport DOM
     const canvas = await html2canvas(container, {
-      scale: 2,
+      scale: 2.0,
       useCORS: true,
       backgroundColor: '#ffffff',
       logging: false,
+      windowWidth: 320,
+      windowHeight: container.offsetHeight || 600,
+      removeContainer: false,
+      imageTimeout: 300,
     });
 
     // 7. Calculate physical dimensions in mm (96 CSS px = 25.4 mm)
-    const cssHeightPx = canvas.height / 2;
+    const cssHeightPx = canvas.height / 2.0;
     const heightMm = Math.ceil((cssHeightPx * 25.4) / 96);
     const widthMm = paperWidth;
 
     // 8. Create jsPDF with exact physical dimensions matching content
+    // Setting compress: false skips CPU-heavy JS deflate on already compressed PNG data URL
     const doc = new jsPDF({
       unit: 'mm',
       format: [widthMm, heightMm],
       orientation: 'portrait',
-      compress: true,
+      compress: false,
     });
 
     (doc as any).autoPaging = false;
 
-    // 9. Embed captured receipt image at exact 1:1 physical dimension
+    // 9. Embed captured receipt image with FAST compression flag for instant generation
     const imgData = canvas.toDataURL('image/png');
-    doc.addImage(imgData, 'PNG', 0, 0, widthMm, heightMm);
+    doc.addImage(imgData, 'PNG', 0, 0, widthMm, heightMm, undefined, 'FAST');
 
     return doc;
   } finally {

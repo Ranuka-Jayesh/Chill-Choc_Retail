@@ -1,24 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCashier } from '@/stores/cashierStore';
-import { Delete, ArrowRight, UserCheck, ArrowLeft } from 'lucide-react';
+import { useOperators } from '@/stores/operatorStore';
+import { Delete, ArrowRight, UserCheck, ArrowLeft, ShieldAlert } from 'lucide-react';
 
 export const CashierPin: React.FC = () => {
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const navigate = useNavigate();
-  const { cashier, hasActiveSession, session } = useCashier();
+  const { cashier, hasActiveSession, session, isBlockedByAdmin, blockedReason } = useCashier();
+  const { isOperatorBlocked, getOperatorByPin } = useOperators();
 
   const handleKeypadPress = (val: string) => {
     if (val === 'back') {
       setPin((prev) => prev.slice(0, -1));
       setError(false);
+      setErrorMessage('');
     } else if (val === 'enter') {
       handleContinue(pin);
     } else if (pin.length < 4) {
       const next = pin + val;
       setPin(next);
       setError(false);
+      setErrorMessage('');
       if (next.length === 4) {
         handleContinue(next);
       }
@@ -27,6 +32,27 @@ export const CashierPin: React.FC = () => {
 
   const handleContinue = (enteredPin: string) => {
     if (enteredPin.length === 4) {
+      if (isBlockedByAdmin) {
+        setError(true);
+        setErrorMessage(blockedReason || 'Terminal is blocked by Administrator via WebSocket.');
+        return;
+      }
+      const matchedOp = getOperatorByPin(enteredPin);
+      if (!matchedOp) {
+        setError(true);
+        setErrorMessage('Invalid PIN. No registered operator found.');
+        return;
+      }
+      if (
+        matchedOp.status !== 'Active' ||
+        isOperatorBlocked(matchedOp.id) ||
+        isOperatorBlocked(matchedOp.handle)
+      ) {
+        setError(true);
+        setErrorMessage(`Operator account (${matchedOp.name} ${matchedOp.handle}) is blocked by Administrator.`);
+        return;
+      }
+
       // If cashier does not have an active session, navigate to start-session, else to /pos
       if (!hasActiveSession || session?.isClosed) {
         navigate('/cashier/start-session');
@@ -35,6 +61,7 @@ export const CashierPin: React.FC = () => {
       }
     } else {
       setError(true);
+      setErrorMessage('Please enter a complete 4-digit register PIN');
     }
   };
 
@@ -107,8 +134,8 @@ export const CashierPin: React.FC = () => {
         </div>
 
         {error && (
-          <p className="text-xs font-bold text-rose-600 mt-1">
-            Please enter a complete 4-digit register PIN
+          <p className="text-xs font-bold text-rose-600 mt-1 px-2 py-1 bg-rose-50 rounded-lg border border-rose-100">
+            {errorMessage || 'Please enter a complete 4-digit register PIN'}
           </p>
         )}
 

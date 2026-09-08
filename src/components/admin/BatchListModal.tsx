@@ -162,7 +162,7 @@ export const BatchListModal: React.FC<BatchListModalProps> = ({ isOpen, onClose,
                       Supplier Batch Barcode
                     </span>
                     <div className="bg-white px-2 py-1 rounded-lg border border-zinc-200/80 shadow-2xs">
-                      <Code39Barcode value={product.barcode} height={30} showText={true} />
+                      <Code39Barcode value={batch.batchNumber || product.barcode} height={30} showText={true} />
                     </div>
                   </div>
                 </div>

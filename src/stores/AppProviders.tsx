@@ -11,6 +11,8 @@ import { SupplierProvider } from './supplierStore';
 import { ProductProvider } from './productStore';
 import { SupplierReturnsProvider } from './supplierReturnsStore';
 import { PurchaseOrderProvider } from './purchaseOrderStore';
+import { StaffProvider } from './staffStore';
+import { OperatorProvider } from './operatorStore';
 import { ToastContainer } from '@/components/common/ToastContainer';
 import { POSLockScreen } from '@/components/pos/POSLockScreen';
 
@@ -23,19 +25,23 @@ export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children
             <ProductProvider>
               <SupplierReturnsProvider>
                 <PurchaseOrderProvider>
-                  <CashierProvider>
-                  <CartProvider>
-                    <HeldBillsProvider>
-                      <SalesProvider>
-                        <ReturnsProvider>
-                          {children}
-                          <POSLockScreen />
-                          <ToastContainer />
-                        </ReturnsProvider>
-                      </SalesProvider>
-                    </HeldBillsProvider>
-                  </CartProvider>
-                </CashierProvider>
+                  <StaffProvider>
+                    <OperatorProvider>
+                      <CashierProvider>
+                    <CartProvider>
+                      <HeldBillsProvider>
+                        <SalesProvider>
+                          <ReturnsProvider>
+                            {children}
+                            <POSLockScreen />
+                            <ToastContainer />
+                          </ReturnsProvider>
+                        </SalesProvider>
+                      </HeldBillsProvider>
+                    </CartProvider>
+                  </CashierProvider>
+                  </OperatorProvider>
+                  </StaffProvider>
                 </PurchaseOrderProvider>
               </SupplierReturnsProvider>
             </ProductProvider>

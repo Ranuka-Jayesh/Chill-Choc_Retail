@@ -98,72 +98,118 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
     );
   }, [selectedDate]);
 
-  // Aggregate sales per salesperson for the selected date
-  const reportData = useMemo(() => {
-    // Deterministic seed based on selected day to produce consistent historical numbers
-    const daySeed = selectedDate.getDate() + (selectedDate.getMonth() + 1) * 31;
+  // Helper: check if a sale's date matches selectedDate
+  const isDateMatching = (saleDateStr: string, targetDate: Date) => {
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
 
-    // Baselines for each salesperson
-    const baseAmounts: Record<string, { sales: number; bills: number; items: number }> = {
-      'sp-1': {
-        sales: isSelectedDateToday ? 18450 : 12000 + (daySeed % 9) * 1200,
-        bills: isSelectedDateToday ? 7 : 5 + (daySeed % 4),
-        items: isSelectedDateToday ? 16 : 10 + (daySeed % 6),
-      },
-      'sp-2': {
-        sales: isSelectedDateToday ? 14200 : 9500 + (daySeed % 7) * 1100,
-        bills: isSelectedDateToday ? 5 : 4 + (daySeed % 3),
-        items: isSelectedDateToday ? 12 : 8 + (daySeed % 5),
-      },
-      'sp-3': {
-        sales: isSelectedDateToday ? 9600 : 7000 + (daySeed % 5) * 900,
-        bills: isSelectedDateToday ? 4 : 3 + (daySeed % 3),
-        items: isSelectedDateToday ? 9 : 6 + (daySeed % 4),
-      },
-      'sp-4': {
-        sales: isSelectedDateToday ? 5800 : 4200 + (daySeed % 4) * 800,
-        bills: isSelectedDateToday ? 3 : 2 + (daySeed % 2),
-        items: isSelectedDateToday ? 6 : 4 + (daySeed % 3),
-      },
-      'sp-5': {
-        sales: isSelectedDateToday ? 3400 : 2500 + (daySeed % 3) * 600,
-        bills: isSelectedDateToday ? 2 : 1 + (daySeed % 2),
-        items: isSelectedDateToday ? 4 : 2 + (daySeed % 3),
-      },
-    };
+    const isTargetToday =
+      targetDate.getDate() === today.getDate() &&
+      targetDate.getMonth() === today.getMonth() &&
+      targetDate.getFullYear() === today.getFullYear();
 
-    // If today, dynamically add live completed sales from salesStore!
-    if (isSelectedDateToday) {
-      sales.forEach((sale) => {
-        // Sales completed in current session
-        sale.items.forEach((item) => {
-          if (item.salesperson && baseAmounts[item.salesperson.id]) {
-            const lineTotal = item.unitPrice * item.quantity;
-            baseAmounts[item.salesperson.id].sales += lineTotal;
-            baseAmounts[item.salesperson.id].items += item.quantity;
-          }
-        });
-      });
+    const isTargetYesterday =
+      targetDate.getDate() === yesterday.getDate() &&
+      targetDate.getMonth() === yesterday.getMonth() &&
+      targetDate.getFullYear() === yesterday.getFullYear();
+
+    const lower = (saleDateStr || '').toLowerCase().trim();
+
+    if (lower === 'today' || lower.startsWith('today')) {
+      return isTargetToday;
+    }
+    if (lower === 'yesterday') {
+      return isTargetYesterday;
     }
 
-    // Map into list with details
+    // Try parsing as ISO or date string
+    const parsed = new Date(saleDateStr);
+    if (!isNaN(parsed.getTime())) {
+      return (
+        parsed.getDate() === targetDate.getDate() &&
+        parsed.getMonth() === targetDate.getMonth() &&
+        parsed.getFullYear() === targetDate.getFullYear()
+      );
+    }
+
+    // Match string formatting e.g. "2026-09-08"
+    const y = targetDate.getFullYear();
+    const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const d = String(targetDate.getDate()).padStart(2, '0');
+    const isoPrefix = `${y}-${m}-${d}`;
+    return saleDateStr.startsWith(isoPrefix);
+  };
+
+  // Aggregate sales per salesperson for the selected date dynamically from salesStore
+  const reportData = useMemo(() => {
+    // 1. Filter completed sales for selected date
+    const daySales = sales.filter(
+      (s) => s.status !== 'Returned' && isDateMatching(s.date, selectedDate)
+    );
+
+    // 2. Track per-salesperson statistics
+    const spStats: Record<
+      string,
+      { totalSales: number; billCount: number; itemCount: number }
+    > = {};
+    const spBills: Record<string, Set<string>> = {};
+
+    MOCK_SALESPERSONS.forEach((sp) => {
+      spStats[sp.id] = { totalSales: 0, billCount: 0, itemCount: 0 };
+      spBills[sp.id] = new Set();
+    });
+
+    daySales.forEach((sale) => {
+      // Find default / bill-level salesperson
+      const billRep =
+        sale.salesperson ||
+        sale.items.find((i) => i.salesperson)?.salesperson ||
+        null;
+
+      // Group items in this sale
+      sale.items.forEach((item) => {
+        const rep = item.salesperson || billRep;
+        const repId = rep?.id;
+
+        if (repId && spStats[repId]) {
+          const itemDiscountVal = item.discount
+            ? item.discount.type === 'percentage'
+              ? (item.unitPrice * item.quantity * item.discount.value) / 100
+              : item.discount.value
+            : 0;
+          const lineTotal = Math.max(0, item.unitPrice * item.quantity - itemDiscountVal);
+
+          spStats[repId].totalSales += lineTotal;
+          spStats[repId].itemCount += item.quantity;
+          spBills[repId].add(sale.id || sale.invoiceNumber);
+        }
+      });
+    });
+
+    // Populate billCount
+    MOCK_SALESPERSONS.forEach((sp) => {
+      spStats[sp.id].billCount = spBills[sp.id].size;
+    });
+
+    // Build sorted list
     const list = MOCK_SALESPERSONS.map((sp) => {
-      const stats = baseAmounts[sp.id] || { sales: 0, bills: 0, items: 0 };
+      const stats = spStats[sp.id];
       return {
         ...sp,
-        totalSales: stats.sales,
-        billCount: stats.bills,
-        itemCount: stats.items,
-        avgBill: stats.bills > 0 ? Math.round(stats.sales / stats.bills) : 0,
+        totalSales: stats.totalSales,
+        billCount: stats.billCount,
+        itemCount: stats.itemCount,
+        avgBill: stats.billCount > 0 ? Math.round(stats.totalSales / stats.billCount) : 0,
       };
     });
 
-    // Sort by sales descending
+    // Sort descending by totalSales
     list.sort((a, b) => b.totalSales - a.totalSales);
 
     // Compute totals
     const totalTeamSales = list.reduce((sum, item) => sum + item.totalSales, 0);
-    const totalBills = list.reduce((sum, item) => sum + item.billCount, 0);
+    const totalBills = daySales.length;
     const totalItems = list.reduce((sum, item) => sum + item.itemCount, 0);
 
     return {
@@ -171,9 +217,9 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
       totalTeamSales,
       totalBills,
       totalItems,
-      topPerformer: list[0],
+      topPerformer: totalTeamSales > 0 ? list[0] : null,
     };
-  }, [selectedDate, isSelectedDateToday, sales]);
+  }, [selectedDate, sales]);
 
   // Filter list by search query
   const filteredSalespersons = useMemo(() => {
@@ -436,7 +482,9 @@ export const SalespersonReportModal: React.FC<SalespersonReportModalProps> = ({
                 <span>Top Performer</span>
               </span>
               <span className="text-sm font-black text-black block truncate mt-0.5">
-                {reportData.topPerformer?.name.split(' ')[0]} ({reportData.topPerformer ? Math.round((reportData.topPerformer.totalSales / (reportData.totalTeamSales || 1)) * 100) : 0}%)
+                {reportData.topPerformer && reportData.totalTeamSales > 0
+                  ? `${reportData.topPerformer.name.split(' ')[0]} (${Math.round((reportData.topPerformer.totalSales / reportData.totalTeamSales) * 100)}%)`
+                  : 'No Sales Yet'}
               </span>
             </div>
           </div>

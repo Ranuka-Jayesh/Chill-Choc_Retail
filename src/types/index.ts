@@ -11,13 +11,17 @@ export type ConfectionCategory =
 export interface Supplier {
   id: string;
   name: string;
+  brand?: string;
   code: string;
   contactPerson: string;
   phone: string;
   email?: string;
+  address?: string;
   leadTimeDays?: number;
   rating?: number;
   status: 'Active' | 'Inactive';
+  since?: string;
+  suppliedProductIds?: string[];
 }
 
 export interface ProductBatch {
@@ -52,6 +56,8 @@ export interface Product {
   batches?: ProductBatch[];
   isAvailable?: boolean;
   expiryDate?: string;
+  supplierId?: string;
+  supplierName?: string;
 }
 
 export interface Salesperson {
@@ -59,6 +65,16 @@ export interface Salesperson {
   name: string;
   code: string;
   avatarInitials: string;
+}
+
+export interface BatchAllocation {
+  batchId: string;
+  batchNumber: string;
+  supplierId: string;
+  supplierName: string;
+  quantity: number;
+  costPrice?: number;
+  expiryDate?: string;
 }
 
 export interface CartItem {
@@ -72,6 +88,7 @@ export interface CartItem {
     value: number;
   } | null;
   note?: string;
+  batchAllocations?: BatchAllocation[];
 }
 
 export interface Customer {
@@ -116,6 +133,7 @@ export interface CompletedSale {
   tenders: PaymentTender[];
   change: number;
   status: 'Completed' | 'Refunded' | 'Partially Refunded' | 'Returned';
+  salesperson?: Salesperson | null;
 }
 
 export interface HeldBill {
@@ -143,13 +161,25 @@ export interface ReturnItem {
   batchNumber?: string;
 }
 
+export interface ExchangeItemDetails {
+  productId: string;
+  productName: string;
+  unitPrice: number;
+  quantity: number;
+  totalValue: number;
+  priceDifference: number; // positive = customer pays extra, negative = customer gets refund, 0 = equal value
+}
+
 export interface ReturnRequest {
   id: string;
   returnCode: string;
   invoiceNumber: string;
+  date?: string;
   timestamp: string;
   items: ReturnItem[];
   totalRefund: number;
+  resolutionType: 'refund' | 'same_replacement' | 'exchange';
+  exchangeItem?: ExchangeItemDetails;
   status: 'Pending Admin Approval' | 'Approved' | 'Rejected';
   submittedBy: string;
   reviewedAt?: string;
@@ -172,6 +202,7 @@ export interface SupplierReturn {
   batchNumber: string;
   reason: 'Damaged' | 'Expired' | 'Quality Issue' | 'Customer Changed Mind' | 'Wrong Product' | 'Packaging Defect' | 'Other';
   claimStatus: 'Pending Dispatch' | 'Dispatched to Supplier' | 'Credit Note Received' | 'Replacement Received' | 'Rejected by Supplier';
+  date?: string;
   timestamp: string;
   notes?: string;
 }
@@ -193,13 +224,16 @@ export interface CashMovement {
   notes?: string;
   timestamp: string;
   cashier: string;
+  date?: string; // YYYY-MM-DD for precise date filtering
 }
 
 export interface CashSession {
   cashier: string;
   register: string;
   startedAt: string;
+  closedAt?: string;
   businessDate: string;
+  sessionDate?: string; // YYYY-MM-DD
   openingCash: number;
   cashSales: number;
   cashRefunds: number;
@@ -234,6 +268,9 @@ export interface POPaymentBreakdown {
   cheque: number;
   chequeDueDate?: string;
   chequeNumber?: string;
+  chequeStatus?: 'PENDING' | 'CLEARED' | 'CANCELLED';
+  previousChequeNumber?: string;
+  unpaidDueDate?: string;
 }
 
 export interface PurchaseOrder {
@@ -254,4 +291,70 @@ export interface PurchaseOrder {
   notes?: string;
   verifiedBy: string;         // e.g. "Store Manager"
 }
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  nic?: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  emergencyContact?: string;
+  role: string;
+  attendances: number;
+  baseSalary: number;
+  payFrequency: 'Monthly' | 'Bi-weekly' | 'Weekly';
+  salaryDate: string; // e.g. "28th of Month"
+  overtimeRate: number; // e.g. 450
+  status: 'Active' | 'Inactive' | 'On Leave';
+  bankName?: string;
+  bankAccount?: string;
+  bankBranch?: string;
+  notes?: string;
+  joiningDate?: string;
+  monthlySalesAttributed?: number;
+  isPaidThisMonth?: boolean;
+  lastPaidDate?: string;
+  lastPaidAmount?: number;
+}
+
+export interface PayrollDisbursement {
+  id: string;
+  staffId: string;
+  staffName: string;
+  role: string;
+  transactionDate: string;
+  disbursementMode: 'Salary Settlement' | 'Salary Advance';
+  basicSalary: number;
+  overtimeHours: number;
+  overtimeRate: number;
+  overtimeAmount: number;
+  bonusAmount: number;
+  bonusReason?: string;
+  deductionAmount: number;
+  deductionReason?: string;
+  totalPayable: number;
+  paymentMethod: 'Cash' | 'Bank Transfer' | 'Cheque';
+  bankDetails?: string;
+  notes?: string;
+}
+
+export type OperatorRole = 'ADMIN' | 'MANAGER' | 'CASHIER';
+
+export interface OperatorCredential {
+  id: string;
+  name: string;
+  handle: string; // e.g. "@admin", "@cashier", "@manager"
+  email?: string;
+  password?: string; // Account password for Admin & Manager logins
+  role: OperatorRole;
+  pin: string; // 4-digit PIN e.g. "1234"
+  status: 'Active' | 'Blocked';
+  avatarColor?: 'teal' | 'gold' | 'indigo' | 'rose' | 'slate';
+  createdAt?: string;
+  lastActiveAt?: string;
+  notes?: string;
+}
+
+
 

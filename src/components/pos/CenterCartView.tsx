@@ -123,8 +123,7 @@ export const CenterCartView: React.FC<CenterCartViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              const target = items.find((i) => i.id === selectedItemId) || items[0] || null;
-              onOpenSalespersonModal(target);
+              onOpenSalespersonModal(null);
             }}
             className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold transition-all border cursor-pointer ${
               activeSalesperson

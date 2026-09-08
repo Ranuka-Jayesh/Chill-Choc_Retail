@@ -12,6 +12,7 @@ import {
   LogOut,
   ShieldCheck,
   Building2,
+  BarChart3,
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -59,8 +60,18 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpen, onCloseMobil
     },
     {
       to: '/admin/staff',
-      label: 'Staff & Cashier PINs',
+      label: 'Staff Management',
       icon: Users,
+    },
+    {
+      to: '/admin/analytics',
+      label: 'Analytics & Reports',
+      icon: BarChart3,
+    },
+    {
+      to: '/admin/credentials',
+      label: 'Terminal Operators',
+      icon: ShieldCheck,
     },
   ];
 

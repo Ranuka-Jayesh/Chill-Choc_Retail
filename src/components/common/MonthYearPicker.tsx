@@ -100,21 +100,21 @@ export const MonthYearPicker: React.FC<MonthYearPickerProps> = ({
   const yearsInGrid = Array.from({ length: 12 }, (_, i) => decadeStart + i);
 
   return (
-    <div className={`relative inline-flex items-center select-none ${className}`} ref={popoverRef}>
-      {/* Month Selector Capsule: Black background, fully rounded radius, clean text, no extra symbols */}
-      <div className="inline-flex items-center bg-black text-white rounded-full px-1.5 py-0.5 border border-zinc-800 shadow-sm select-none">
+    <div className={`relative inline-flex items-center select-none shrink-0 ${className}`} ref={popoverRef}>
+      {/* Month Selector Capsule: Fixed width, black background, fully rounded radius, clean text */}
+      <div className="w-[175px] h-7 flex items-center justify-between bg-black text-white rounded-full px-1.5 border border-zinc-800 shadow-sm select-none shrink-0">
         {/* Left Arrow Button */}
         <button
           type="button"
           onClick={handlePrevMonth}
           title="Previous month"
-          className="w-6 h-6 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors flex items-center justify-center cursor-pointer active:scale-90"
+          className="w-6 h-6 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors flex items-center justify-center cursor-pointer active:scale-90 flex-shrink-0"
           aria-label="Previous month"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
         </button>
 
-        {/* Center Button: Month & Year Label (pure text, no symbols) */}
+        {/* Center Button: Month & Year Label (pure text, fixed center, no layout shifts) */}
         <button
           type="button"
           onClick={() => {
@@ -122,7 +122,7 @@ export const MonthYearPicker: React.FC<MonthYearPickerProps> = ({
             setView('months');
             setBrowsingYear(selectedDate.getFullYear());
           }}
-          className={`px-2.5 py-0.5 text-xs font-bold transition-colors cursor-pointer tracking-tight whitespace-nowrap ${
+          className={`flex-1 text-center px-1 py-0.5 text-xs font-bold transition-colors cursor-pointer tracking-tight whitespace-nowrap truncate ${
             isOpen ? 'text-[#FF5500]' : 'text-white hover:text-[#FF5500]'
           }`}
           title="Click to select month or year"
@@ -135,7 +135,7 @@ export const MonthYearPicker: React.FC<MonthYearPickerProps> = ({
           type="button"
           onClick={handleNextMonth}
           title="Next month"
-          className="w-6 h-6 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors flex items-center justify-center cursor-pointer active:scale-90"
+          className="w-6 h-6 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors flex items-center justify-center cursor-pointer active:scale-90 flex-shrink-0"
           aria-label="Next month"
         >
           <ChevronRight className="w-3.5 h-3.5" />

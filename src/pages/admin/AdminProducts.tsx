@@ -1105,14 +1105,14 @@ export const AdminProducts: React.FC = () => {
       <BatchListModal
         isOpen={Boolean(selectedProductForBatches)}
         onClose={() => setSelectedProductForBatches(null)}
-        product={selectedProductForBatches}
+        product={products.find((p) => p.id === selectedProductForBatches?.id) || selectedProductForBatches}
       />
 
       {/* Product Details & Suppliers Breakdown Modal */}
       <ProductDetailsModal
         isOpen={Boolean(selectedProductForDetails)}
         onClose={() => setSelectedProductForDetails(null)}
-        product={selectedProductForDetails}
+        product={products.find((p) => p.id === selectedProductForDetails?.id) || selectedProductForDetails}
         onEdit={(prod) => {
           setSelectedProductForDetails(null);
           handleOpenEdit(prod);

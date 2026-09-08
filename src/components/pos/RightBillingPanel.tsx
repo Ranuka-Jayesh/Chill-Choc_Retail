@@ -4,6 +4,7 @@ import { useCart } from '@/stores/cartStore';
 import { useCashier } from '@/stores/cashierStore';
 import { useSales } from '@/stores/salesStore';
 import { PaymentMethod, PaymentTender, CompletedSale } from '@/types';
+import { MOCK_SALESPERSONS } from '@/data/mockEmployees';
 
 interface RightBillingPanelProps {
   onPaymentSuccess: (sale: CompletedSale) => void;
@@ -26,6 +27,7 @@ export const RightBillingPanel: React.FC<RightBillingPanelProps> = ({
     tax,
     total,
     itemsCount,
+    defaultSalesperson,
     clearCart: _clearCart,
   } = useCart();
 
@@ -216,6 +218,11 @@ export const RightBillingPanel: React.FC<RightBillingPanelProps> = ({
       }
     }
 
+    const effectiveSalesperson =
+      defaultSalesperson ||
+      items.find((i) => i.salesperson)?.salesperson ||
+      MOCK_SALESPERSONS[0];
+
     const sale = completeSale({
       items,
       subtotal,
@@ -226,6 +233,7 @@ export const RightBillingPanel: React.FC<RightBillingPanelProps> = ({
       tenders,
       change: finalChange,
       cashierName: cashier.name,
+      salesperson: effectiveSalesperson,
     });
 
     setAmountReceivedStr('');
@@ -319,23 +327,25 @@ export const RightBillingPanel: React.FC<RightBillingPanelProps> = ({
     <div className="h-full flex flex-col bg-white select-none overflow-hidden border-l border-zinc-200">
       {/* Billing Panel Header */}
       <div className="h-12 px-3.5 border-b border-zinc-200 flex items-center justify-between flex-shrink-0 bg-white">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-black text-white flex items-center justify-center">
-            <CreditCard className="w-3.5 h-3.5 text-[#FF5500]" />
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-black text-white flex items-center justify-center flex-shrink-0 shadow-xs">
+            <CreditCard className="w-4 h-4 text-[#FF5500]" />
           </div>
           <div>
             <h3 className="text-xs font-black text-black leading-tight">
               Billing & Tender
             </h3>
-            <span className="text-[9px] text-zinc-400">
+            <span className="text-[10px] text-zinc-400">
               Register {cashier.register} &bull; Colombo
             </span>
           </div>
         </div>
 
-        <span className="text-[9px] font-mono font-bold text-white bg-black px-2 py-0.5 rounded">
-          {selectedMethod === 'other' ? 'SPLIT' : selectedMethod.toUpperCase()}
-        </span>
+        <div className="flex items-center gap-2">
+          <div className="px-2 py-0.5 rounded-md bg-black text-white text-[10px] font-black uppercase tracking-wider shadow-xs">
+            {selectedMethod === 'other' ? 'SPLIT' : selectedMethod.toUpperCase()}
+          </div>
+        </div>
       </div>
 
       {/* Main Billing Content */}

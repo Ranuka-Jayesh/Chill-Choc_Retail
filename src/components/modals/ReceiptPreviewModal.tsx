@@ -5,7 +5,7 @@ import { useToast } from '@/stores/toastStore';
 import { generateReceiptPdf, downloadReceiptPdf } from '@/services/receiptPdfGenerator';
 import { ThermalReceiptContent } from '@/components/pos/ThermalReceiptContent';
 import { PrintableReceiptPortal } from '@/components/pos/PrintableReceiptPortal';
-import { Printer, Download } from 'lucide-react';
+import { Printer, Download, Loader2 } from 'lucide-react';
 
 interface ReceiptPreviewModalProps {
   isOpen: boolean;
@@ -80,11 +80,11 @@ export const ReceiptPreviewModal: React.FC<ReceiptPreviewModalProps> = ({
           </div>
 
           {/* Action Buttons Below Receipt */}
-          <div className="flex items-center justify-center gap-2.5 mt-4 shrink-0 flex-wrap">
+          <div className="flex items-center justify-center gap-3 mt-4 shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2.5 rounded-full bg-[#2A2A2A] hover:bg-[#383838] active:scale-95 text-white font-bold text-xs tracking-wide transition-all shadow-md cursor-pointer"
+              className="h-10 px-6 rounded-full bg-[#2A2A2A] hover:bg-[#383838] active:scale-95 text-white font-bold text-xs tracking-wide transition-all shadow-md cursor-pointer flex items-center justify-center"
             >
               Done
             </button>
@@ -92,20 +92,31 @@ export const ReceiptPreviewModal: React.FC<ReceiptPreviewModalProps> = ({
             <button
               type="button"
               onClick={handleDownloadPdf}
-              className="px-5 py-2.5 rounded-full bg-white hover:bg-zinc-100 active:scale-95 text-zinc-900 font-bold text-xs tracking-wide transition-all shadow-md border border-zinc-300 flex items-center gap-1.5 cursor-pointer"
+              disabled={isSubmitting}
+              title="Download PDF"
+              aria-label="Download PDF"
+              className="w-10 h-10 rounded-full bg-white hover:bg-zinc-100 active:scale-95 disabled:opacity-60 text-zinc-800 hover:text-black transition-all shadow-md border border-zinc-200/90 flex items-center justify-center cursor-pointer shrink-0"
             >
-              <Download className="w-3.5 h-3.5 text-zinc-700" />
-              <span>Download PDF</span>
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin text-zinc-600" />
+              ) : (
+                <Download className="w-4 h-4 text-zinc-700" />
+              )}
             </button>
 
             <button
               type="button"
               onClick={handlePrint}
               disabled={isSubmitting || isPrinting}
-              className="px-6 py-2.5 rounded-full bg-[#14B8A6] hover:bg-[#0D9488] active:scale-95 disabled:opacity-60 text-white font-bold text-xs tracking-wide transition-all shadow-lg shadow-teal-500/25 flex items-center gap-1.5 cursor-pointer"
+              title="Print Receipt"
+              aria-label="Print Receipt"
+              className="w-10 h-10 rounded-full bg-[#14B8A6] hover:bg-[#0D9488] active:scale-95 disabled:opacity-60 text-white transition-all shadow-lg shadow-teal-500/25 flex items-center justify-center cursor-pointer shrink-0"
             >
-              <Printer className="w-4 h-4" />
-              <span>{isSubmitting || isPrinting ? 'Printing...' : 'Print Receipt'}</span>
+              {isSubmitting || isPrinting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Printer className="w-4 h-4" />
+              )}
             </button>
           </div>
         </div>

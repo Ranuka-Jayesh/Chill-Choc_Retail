@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Search, X, LayoutGrid, List } from 'lucide-react';
 import { Product } from '@/types';
 import { useCart } from '@/stores/cartStore';
+import { isBatchExpired } from '@/stores/productStore';
 import { BarcodeNotFoundModal } from '@/components/modals/BarcodeNotFoundModal';
+import { ExpiredProductData } from '@/components/modals/ProductExpiredModal';
 
 interface POSSearchProps {
   searchQuery: string;
@@ -12,6 +14,15 @@ interface POSSearchProps {
   inputRef?: React.RefObject<HTMLInputElement | null>;
   viewMode?: 'list' | 'grid';
   onToggleViewMode?: () => void;
+  onArrowRight?: () => void;
+  onArrowLeft?: () => void;
+  onArrowUp?: () => void;
+  onArrowDown?: () => void;
+  onSelectProduct?: () => void;
+  isFocused?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  onProductExpired?: (data: ExpiredProductData) => void;
 }
 
 export const POSSearch: React.FC<POSSearchProps> = ({
@@ -21,16 +32,53 @@ export const POSSearch: React.FC<POSSearchProps> = ({
   inputRef,
   viewMode = 'grid',
   onToggleViewMode,
+  onArrowRight,
+  onArrowLeft,
+  onArrowUp,
+  onArrowDown,
+  onSelectProduct,
+  isFocused = false,
+  onFocus,
+  onBlur,
+  onProductExpired,
 }) => {
   const navigate = useNavigate();
   const { addItem } = useCart();
   const [failedBarcode, setFailedBarcode] = useState<string | null>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      onArrowDown?.();
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      onArrowUp?.();
+      return;
+    }
+
+    if (e.key === 'ArrowRight') {
+      const input = e.currentTarget;
+      if (!searchQuery || input.selectionStart === input.value.length) {
+        e.preventDefault();
+        onArrowRight?.();
+        return;
+      }
+    }
+
+    if (e.key === 'ArrowLeft') {
+      const input = e.currentTarget;
+      if (!searchQuery || (input.selectionStart === 0 && input.selectionEnd === 0)) {
+        e.preventDefault();
+        onArrowLeft?.();
+        return;
+      }
+    }
+
     if (e.key === 'Enter') {
       const term = searchQuery.trim();
-      if (!term) return;
-
       const cleanTerm = term.replace(/^\*+|\*+$/g, '').trim();
 
       // Check if it's an invoice barcode
@@ -43,46 +91,108 @@ export const POSSearch: React.FC<POSSearchProps> = ({
         return;
       }
 
-      // 1. Try exact barcode match
-      const barcodeMatch = products.find((p) => p.barcode === cleanTerm || p.barcode === term);
-      if (barcodeMatch) {
-        addItem(barcodeMatch);
-        onSearchChange('');
+      // If scanner scanned numbers (barcode with 8+ digits)
+      if (/^\d{8,}$/.test(cleanTerm)) {
+        for (const p of products) {
+          const batch = p.batches?.find(
+            (b) => b.batchNumber.toLowerCase() === cleanTerm.toLowerCase()
+          );
+          if (batch) {
+            if (isBatchExpired(batch.expiryDate)) {
+              onProductExpired?.({
+                product: p,
+                batchNumber: batch.batchNumber,
+                expiryDate: batch.expiryDate,
+                supplierName: batch.supplierName,
+              });
+              onSearchChange('');
+              return;
+            }
+            addItem(p, 1, null, batch.batchNumber);
+            onSearchChange('');
+            return;
+          }
+        }
+
+        const barcodeMatch = products.find((p) => p.barcode === cleanTerm || p.barcode === term);
+        if (barcodeMatch) {
+          if (
+            (barcodeMatch.expiryDate && isBatchExpired(barcodeMatch.expiryDate)) ||
+            (barcodeMatch.batches && barcodeMatch.batches.length === 1 && isBatchExpired(barcodeMatch.batches[0].expiryDate))
+          ) {
+            onProductExpired?.({
+              product: barcodeMatch,
+              expiryDate: barcodeMatch.expiryDate || barcodeMatch.batches?.[0]?.expiryDate,
+              batchNumber: barcodeMatch.batches?.[0]?.batchNumber,
+              supplierName: barcodeMatch.batches?.[0]?.supplierName,
+            });
+            onSearchChange('');
+            return;
+          }
+          addItem(barcodeMatch);
+          onSearchChange('');
+          return;
+        }
+
+        setFailedBarcode(term);
         return;
       }
 
-      // 2. Try exact SKU match
+      // Otherwise select the currently highlighted product card!
+      if (onSelectProduct) {
+        e.preventDefault();
+        onSelectProduct();
+        return;
+      }
+
+      // Fallback exact SKU match
       const skuMatch = products.find((p) => p.sku.toLowerCase() === term.toLowerCase());
       if (skuMatch) {
+        if (
+          (skuMatch.expiryDate && isBatchExpired(skuMatch.expiryDate)) ||
+          (skuMatch.batches && skuMatch.batches.length === 1 && isBatchExpired(skuMatch.batches[0].expiryDate))
+        ) {
+          onProductExpired?.({
+            product: skuMatch,
+            expiryDate: skuMatch.expiryDate || skuMatch.batches?.[0]?.expiryDate,
+            batchNumber: skuMatch.batches?.[0]?.batchNumber,
+            supplierName: skuMatch.batches?.[0]?.supplierName,
+          });
+          onSearchChange('');
+          return;
+        }
         addItem(skuMatch);
         onSearchChange('');
         return;
       }
+    }
 
-      // 3. Try exact Name match
-      const exactNameMatch = products.find(
-        (p) => p.name.toLowerCase() === term.toLowerCase()
-      );
-      if (exactNameMatch) {
-        addItem(exactNameMatch);
-        onSearchChange('');
-        return;
-      }
-
-      // 4. If all numbers and length >= 8, treated as barcode scan that failed
-      if (/^\d{8,}$/.test(term)) {
-        setFailedBarcode(term);
-      }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onSearchChange('');
+      inputRef?.current?.blur();
+      onBlur?.();
+      return;
     }
   };
 
   return (
     <>
       <div className="relative w-full select-none">
-        {/* Sleek White Pill Search Bar with Orange Border & Integrated Multifunctional View Toggle */}
-        <div className="relative flex items-center h-10 sm:h-10.5 bg-white rounded-full pl-3.5 pr-[3px] border-2 border-[#FF5500] shadow-xs transition-all focus-within:ring-4 focus-within:ring-[#FF5500]/20 focus-within:shadow-md">
+        {/* Sleek White Pill Search Bar with Dynamic Active State & Integrated Multifunctional View Toggle */}
+        <div
+          className={`relative flex items-center h-10 sm:h-10.5 bg-white rounded-full pl-3.5 pr-[3px] transition-all duration-150 ${
+            isFocused
+              ? 'border-2 border-[#FF5500] ring-4 ring-[#FF5500]/20 shadow-md'
+              : 'border border-zinc-200 hover:border-zinc-300 shadow-xs'
+          }`}
+        >
           {/* Search Icon */}
-          <div className="text-[#FF5500] pointer-events-none flex-shrink-0 mr-2 flex items-center justify-center">
+          <div
+            className={`${
+              isFocused ? 'text-[#FF5500]' : 'text-zinc-400'
+            } pointer-events-none flex-shrink-0 mr-2 flex items-center justify-center transition-colors`}
+          >
             <Search className="w-4 h-4" />
           </div>
 
@@ -94,6 +204,8 @@ export const POSSearch: React.FC<POSSearchProps> = ({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={handleKeyDown}
+            onFocus={onFocus}
+            onBlur={onBlur}
             placeholder="Search products..."
             className="w-full bg-transparent text-xs sm:text-sm font-semibold text-zinc-900 placeholder:text-zinc-400 focus:outline-none min-w-0 caret-[#FF5500]"
           />

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Product } from '@/types';
 import { Plus } from 'lucide-react';
+import { useCart } from '@/stores/cartStore';
 
 interface ProductCardProps {
   product: Product;
@@ -8,9 +9,14 @@ interface ProductCardProps {
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
+  const { items: cartItems } = useCart();
+  const inCartItem = cartItems.find((ci) => ci.product.id === product.id);
+  const inCartQty = inCartItem ? inCartItem.quantity : 0;
+  const availableStock = Math.max(0, product.stock - inCartQty);
+
   const isUnavailable = product.isAvailable === false;
-  const isOutOfStock = !isUnavailable && product.stock <= 0;
-  const isLowStock = !isUnavailable && !isOutOfStock && product.stock <= (product.lowStockThreshold || 5);
+  const isOutOfStock = !isUnavailable && availableStock <= 0;
+  const isLowStock = !isUnavailable && !isOutOfStock && availableStock <= (product.lowStockThreshold || 5);
 
   return (
     <div
@@ -19,10 +25,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }
           onAddToCart(product);
         }
       }}
-      className={`group relative bg-white rounded-xl border border-zinc-200 p-2.5 flex flex-col justify-between transition-all duration-150 select-none shadow-xs ${
+      className={`group relative bg-white rounded-xl border p-2.5 flex flex-col justify-between transition-all duration-150 select-none shadow-xs ${
         isUnavailable || isOutOfStock
-          ? 'opacity-60 cursor-not-allowed bg-zinc-50 border-dashed'
-          : 'cursor-pointer hover:border-[#FF5500] hover:shadow-sm hover:-translate-y-0.5 active:scale-[0.98]'
+          ? 'opacity-60 cursor-not-allowed bg-zinc-50 border-dashed border-zinc-200'
+          : 'border-zinc-200 cursor-pointer hover:border-zinc-300 hover:shadow-sm hover:-translate-y-0.5 active:scale-[0.98]'
       }`}
     >
       {/* Top Media / Confectionery Image */}
@@ -64,19 +70,21 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }
           </div>
         ) : null}
 
-        {isLowStock && (
-          <div className="absolute bottom-1.5 right-1.5">
-            <span className="px-1.5 py-0.5 rounded bg-orange-100 text-[#FF5500] text-[9px] font-bold border border-orange-200">
-              Only {product.stock} left
-            </span>
-          </div>
-        )}
+        {/* Stock Qty Count (black circle with white bold number at right top corner) */}
+        <div className="absolute top-1.5 right-1.5 z-10">
+          <span
+            className="min-w-[20px] h-[20px] px-1 rounded-full bg-black text-white font-mono font-black text-[9px] flex items-center justify-center shadow-md border border-white/25 leading-none select-none"
+            title={`Available Stock: ${availableStock} (Total: ${product.stock}, In Cart: ${inCartQty})`}
+          >
+            {availableStock}
+          </span>
+        </div>
 
         {/* Quick Add overlay button */}
         {!isOutOfStock && !isUnavailable && (
           <div className="absolute bottom-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="w-6 h-6 rounded-lg bg-[#FF5500] text-white flex items-center justify-center shadow-xs">
-              <Plus className="w-3.5 h-3.5" />
+            <div className="w-6 h-6 aspect-square rounded-md bg-zinc-100 hover:bg-zinc-200 text-zinc-700 flex items-center justify-center shadow-xs transition-colors shrink-0">
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
             </div>
           </div>
         )}

@@ -3,7 +3,15 @@ import { Modal } from '@/components/common/Modal';
 import { Product } from '@/types';
 import { usePrinter } from '@/hooks/usePrinter';
 import { useToast } from '@/stores/toastStore';
-import { generateTSPLLabel } from '@/services/tsplGenerator';
+import { generateTSPLLabel, LabelSize } from '@/services/tsplGenerator';
+import { generateESCPOSLabel, generateCode39SvgHtml } from '@/services/escposLabelGenerator';
+import {
+  LABEL_SIZE_CONFIGS,
+  ORDERED_LABEL_SIZES,
+  formatDisplayTitle,
+  extractProductMeasurement,
+  getDynamicTitleSizePt,
+} from '@/services/labelConfig';
 import {
   Printer,
   Barcode,
@@ -14,6 +22,7 @@ import {
   AlertCircle,
   X,
 } from 'lucide-react';
+import { ThermalLabelDiagramPreview } from '@/components/pos/ThermalLabelDiagramPreview';
 
 interface ProductLabelModalProps {
   isOpen: boolean;
@@ -34,7 +43,10 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
   const [selectedProductId, setSelectedProductId] = useState<string>(
     initialProduct?.id || products[0]?.id || ''
   );
-  const [labelType, setLabelType] = useState<'barcode' | 'shelftag'>('barcode');
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('all');
+  const [labelSize, setLabelSize] = useState<LabelSize>('40x20');
+  const labelType: 'barcode' | 'shelftag' = labelSize === '50x30' ? 'shelftag' : 'barcode';
+  const [printerProtocol, setPrinterProtocol] = useState<'escpos' | 'tspl'>('escpos');
   const [copies, setCopies] = useState<number>(1);
   const [showRawTspl, setShowRawTspl] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -43,42 +55,241 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
   React.useEffect(() => {
     if (initialProduct) {
       setSelectedProductId(initialProduct.id);
+      if (initialProduct.batches && initialProduct.batches.length > 0) {
+        setSelectedBatchId(initialProduct.batches[0].id);
+      } else {
+        setSelectedBatchId('all');
+      }
     } else if (!selectedProductId && products.length > 0) {
       setSelectedProductId(products[0].id);
+      if (products[0].batches && products[0].batches.length > 0) {
+        setSelectedBatchId(products[0].batches[0].id);
+      }
     }
   }, [initialProduct, products, selectedProductId]);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId) || products[0];
+
+  const activeBatch = selectedProduct?.batches?.find((b) => b.id === selectedBatchId);
+  const activeBarcode = activeBatch?.batchNumber || selectedProduct?.barcode || '';
 
   if (!isOpen || !selectedProduct) return null;
 
   const tsplString = generateTSPLLabel(selectedProduct, {
     copies,
     labelType,
+    labelSize,
+    batchNumber: activeBatch?.batchNumber,
+    storeName: 'Chill&Chock',
   });
+
+  const printViaBrowser = () => {
+    const printWindow = window.open('', '_blank', 'width=600,height=700');
+    if (!printWindow) {
+      showToast('Please allow popups to print labels via browser', 'error');
+      return;
+    }
+
+    const cfg = LABEL_SIZE_CONFIGS[labelSize] || LABEL_SIZE_CONFIGS['40x20'];
+    const formattedPrice = selectedProduct.price.toLocaleString('en-LK', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const { cleanTitle, measurement } = extractProductMeasurement(selectedProduct.name, selectedProduct.weight);
+    const measurementSuffix = measurement ? `<span class="price-unit">/ ${measurement}</span>` : '';
+    const dynamicTitleSizePt = getDynamicTitleSizePt(cleanTitle.length, cfg.titleFontSizePt);
+
+    let htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Print Label - ${selectedProduct.name}</title>
+        <style>
+          @page {
+            size: ${cfg.widthMm}mm ${cfg.heightMm}mm;
+            margin: 0;
+          }
+          @media print {
+            html, body {
+              width: ${cfg.widthMm}mm;
+              height: ${cfg.heightMm}mm;
+              margin: 0;
+              padding: 0;
+            }
+          }
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+          }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background: #ffffff;
+            color: #000000;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .label-page {
+            width: ${cfg.widthMm}mm;
+            height: ${cfg.heightMm}mm;
+            max-width: ${cfg.widthMm}mm;
+            max-height: ${cfg.heightMm}mm;
+            padding: ${cfg.pagePadding};
+            page-break-after: always;
+            page-break-inside: avoid;
+            break-after: page;
+            break-inside: avoid;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            text-align: center;
+            overflow: hidden;
+            box-sizing: border-box;
+            background: #ffffff;
+            color: #000000;
+          }
+          .label-text-block {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-shrink: 0;
+          }
+          .brand-title {
+            font-family: Georgia, "Times New Roman", Times, serif;
+            font-weight: 900;
+            font-size: ${cfg.brandFontSizePt}pt;
+            line-height: 1;
+            letter-spacing: -0.2px;
+            color: #000000;
+          }
+          .brand-tagline {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            font-weight: 400;
+            font-size: ${cfg.taglineFontSizePt}pt;
+            line-height: 1;
+            color: #000000;
+            margin-top: 0.2mm;
+          }
+          .prod-title {
+            font-size: ${dynamicTitleSizePt}pt;
+            font-weight: 700;
+            line-height: 1.1;
+            color: #000000;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-break: break-word;
+            max-width: 100%;
+            margin-top: 0.3mm;
+          }
+          .price-big {
+            font-size: ${cfg.priceFontSizePt}pt;
+            font-weight: 900;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            line-height: 1;
+            color: #000000;
+            letter-spacing: -0.3px;
+            margin-top: 0.3mm;
+          }
+          .price-unit {
+            font-size: ${Math.max(4.5, Math.round(cfg.priceFontSizePt * 0.5))}pt;
+            font-weight: 700;
+            color: #000000;
+            margin-left: 0.5mm;
+          }
+          .barcode-box {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-top: auto;
+            flex-shrink: 0;
+          }
+          .barcode-text {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
+            font-size: ${cfg.barcodeFontSizePt}pt;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            line-height: 1;
+            margin-top: 0.15mm;
+            color: #000000;
+          }
+        </style>
+      </head>
+      <body>
+    `;
+
+    for (let c = 0; c < copies; c++) {
+      htmlContent += `
+        <div class="label-page">
+          <div class="label-text-block">
+            <div class="brand-title">Chill&amp;Chock</div>
+            ${cfg.showTagline ? `<div class="brand-tagline">Cool vibe sweet bite</div>` : ''}
+            <div class="prod-title">${cleanTitle}</div>
+            <div class="price-big">Rs. ${formattedPrice}${measurementSuffix}</div>
+          </div>
+          <div class="barcode-box">
+            ${generateCode39SvgHtml(activeBarcode, cfg.barcodeSvgHeight, cfg.barcodeMaxBarWidth)}
+            <div class="barcode-text">${activeBarcode}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    htmlContent += `
+        <script>
+          window.onload = function() {
+            setTimeout(function() { window.print(); }, 250);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
 
   const handlePrint = async () => {
     if (!isConnected) {
-      showToast('POS Print Agent is offline. Please start the agent at 127.0.0.1:17891', 'error');
+      printViaBrowser();
       return;
     }
 
     setIsSubmitting(true);
     const jobId = 'label-' + Date.now();
 
+    const printData =
+      printerProtocol === 'escpos'
+        ? generateESCPOSLabel(selectedProduct, {
+            copies,
+            labelType,
+            labelSize,
+            batchNumber: activeBatch?.batchNumber,
+            storeName: 'Chill&Chock',
+          })
+        : tsplString;
+
     try {
       await printLabel({
-        data: tsplString,
+        data: printData,
         jobId,
       });
       showToast(
-        `Sent ${copies}x ${labelType === 'shelftag' ? 'shelf tag' : 'barcode'} to label printer!`,
+        `Sent ${copies}x ${labelType === 'shelftag' ? 'shelf tag' : 'barcode'} to ${printerProtocol === 'escpos' ? 'XP-80TS' : 'label'} printer!`,
         'success'
       );
       onClose();
     } catch (err: any) {
       console.error('Failed to print label:', err);
-      showToast(`Print failed: ${err.message || 'Unknown error'}`, 'error');
+      showToast(`Print agent error. Opening browser print...`, 'error');
+      printViaBrowser();
     } finally {
       setIsSubmitting(false);
     }
@@ -138,36 +349,77 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
             </select>
           </div>
 
-          {/* Label Type Selector */}
+          {/* Batch Barcode Selector */}
+          {selectedProduct.batches && selectedProduct.batches.length > 0 && (
+            <div>
+              <label className="block text-[11px] font-bold text-zinc-700 mb-1 uppercase tracking-wider">
+                Batch Number Barcode
+              </label>
+              <select
+                value={selectedBatchId}
+                onChange={(e) => setSelectedBatchId(e.target.value)}
+                className="w-full h-9 rounded-xl border border-zinc-200 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#FF5500]"
+              >
+                <option value="all">Master SKU Barcode ({selectedProduct.barcode})</option>
+                {selectedProduct.batches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    Batch {b.batchNumber} • {b.supplierName} ({b.quantityRemaining} in stock)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Label Type & Printer Mode Selector */}
           <div>
-            <label className="block text-[11px] font-bold text-zinc-700 mb-1 uppercase tracking-wider">
-              Label Format
-            </label>
-            <div className="grid grid-cols-2 gap-1.5 h-9 bg-zinc-100 p-0.5 rounded-xl border border-zinc-200">
-              <button
-                type="button"
-                onClick={() => setLabelType('barcode')}
-                className={`flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-all ${
-                  labelType === 'barcode'
-                    ? 'bg-white text-[#FF5500] shadow-xs'
-                    : 'text-zinc-600 hover:text-black'
-                }`}
-              >
-                <Barcode className="w-3.5 h-3.5" />
-                <span>Barcode (40x30)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setLabelType('shelftag')}
-                className={`flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-all ${
-                  labelType === 'shelftag'
-                    ? 'bg-white text-[#FF5500] shadow-xs'
-                    : 'text-zinc-600 hover:text-black'
-                }`}
-              >
-                <Tag className="w-3.5 h-3.5" />
-                <span>Shelf Tag (50x30)</span>
-              </button>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-zinc-700 uppercase tracking-wider">
+                Format &amp; Mode
+              </label>
+              {/* Protocol selector */}
+              <div className="flex items-center gap-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-[10px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setPrinterProtocol('escpos')}
+                  className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                    printerProtocol === 'escpos' ? 'bg-black text-white shadow-2xs' : 'text-zinc-600 hover:text-black'
+                  }`}
+                  title="ESC/POS commands for Xprinter XP-80TS"
+                >
+                  XP-80TS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrinterProtocol('tspl')}
+                  className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                    printerProtocol === 'tspl' ? 'bg-black text-white shadow-2xs' : 'text-zinc-600 hover:text-black'
+                  }`}
+                  title="TSPL for dedicated label printers (XP-365B, Zebra)"
+                >
+                  TSPL
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 bg-zinc-50 p-1 rounded-xl border border-zinc-200">
+              {ORDERED_LABEL_SIZES.map((sz) => {
+                const cfg = LABEL_SIZE_CONFIGS[sz];
+                const isSelected = labelSize === sz;
+                return (
+                  <button
+                    key={sz}
+                    type="button"
+                    onClick={() => setLabelSize(sz)}
+                    className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-black text-white shadow-xs'
+                        : 'text-zinc-600 hover:text-black hover:bg-white'
+                    }`}
+                    title={cfg.name}
+                  >
+                    <span className="leading-tight font-mono">{cfg.name.replace(' mm', '')}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -215,12 +467,12 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-              Thermal Label Preview ({labelType === 'shelftag' ? '50mm × 30mm' : '40mm × 30mm'})
+              Thermal Label Preview ({labelSize.replace('x', 'mm × ')}mm)
             </span>
             <button
               type="button"
               onClick={() => setShowRawTspl(!showRawTspl)}
-              className="text-[10px] font-semibold text-zinc-500 hover:text-black flex items-center gap-1 transition-colors"
+              className="text-[10px] font-semibold text-zinc-500 hover:text-black flex items-center gap-1 transition-colors cursor-pointer"
             >
               <Code2 className="w-3 h-3" />
               <span>{showRawTspl ? 'Hide RAW TSPL' : 'View RAW TSPL'}</span>
@@ -232,71 +484,18 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
               {tsplString}
             </pre>
           ) : (
-            <div className="flex justify-center p-3 bg-zinc-100/70 rounded-2xl border border-zinc-200/80">
-              {labelType === 'shelftag' ? (
-                /* Shelf Edge Tag Simulation (50x30mm) */
-                <div className="w-[280px] bg-white rounded-lg shadow-md border-2 border-zinc-300 p-3 font-sans flex flex-col justify-between relative overflow-hidden">
-                  <div className="border-b border-zinc-200 pb-1 flex items-center justify-between">
-                    <span className="text-[9px] font-black tracking-widest text-[#FF5500] uppercase">
-                      CHILL & CHOC
-                    </span>
-                    <span className="text-[8px] font-bold text-zinc-400 tracking-wider">
-                      SHELF TAG
-                    </span>
-                  </div>
-                  <div className="my-1">
-                    <h4 className="text-xs font-black text-black leading-tight truncate">
-                      {selectedProduct.name}
-                    </h4>
-                    <span className="text-[9px] text-zinc-500 font-medium">
-                      {selectedProduct.weight} • SKU: {selectedProduct.sku}
-                    </span>
-                  </div>
-                  <div className="flex items-end justify-between mt-1 pt-1 border-t border-dashed border-zinc-200">
-                    <div className="flex flex-col">
-                      {/* Barcode graphic simulation */}
-                      <div className="h-6 w-28 bg-[repeating-linear-gradient(90deg,#000,#000_1.5px,#fff_1.5px,#fff_3px)]" />
-                      <span className="text-[8px] font-mono text-zinc-600 tracking-widest mt-0.5">
-                        {selectedProduct.barcode}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[8px] font-bold text-zinc-400 block uppercase">
-                        Retail Price
-                      </span>
-                      <span className="text-sm font-black text-black font-mono leading-none">
-                        Rs. {selectedProduct.price.toLocaleString('en-LK', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                /* Product Barcode Sticker Simulation (40x30mm) */
-                <div className="w-[240px] bg-white rounded-lg shadow-md border-2 border-zinc-300 p-2.5 font-sans flex flex-col justify-between text-center relative">
-                  <div>
-                    <span className="text-[9px] font-black text-[#FF5500] uppercase tracking-wider block">
-                      CHILL & CHOC
-                    </span>
-                    <h4 className="text-[11px] font-bold text-zinc-900 truncate leading-tight mt-0.5">
-                      {selectedProduct.name}
-                    </h4>
-                    <span className="text-[8px] font-medium text-zinc-400">
-                      {selectedProduct.weight} • {selectedProduct.sku}
-                    </span>
-                  </div>
-                  <div className="my-1.5 flex flex-col items-center">
-                    <div className="h-7 w-36 bg-[repeating-linear-gradient(90deg,#000,#000_1.5px,#fff_1.5px,#fff_3.5px)]" />
-                    <span className="text-[8.5px] font-mono font-semibold text-zinc-700 tracking-widest mt-0.5">
-                      {selectedProduct.barcode}
-                    </span>
-                  </div>
-                  <div className="border-t border-zinc-100 pt-0.5">
-                    <span className="text-xs font-black text-black font-mono">
-                      Rs. {selectedProduct.price.toLocaleString('en-LK', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              )}
+            <div className="flex flex-col items-center justify-center p-4 sm:p-6 bg-white rounded-2xl border border-zinc-200">
+              <div className="w-full flex justify-center py-1">
+                <ThermalLabelDiagramPreview
+                  labelSize={labelSize}
+                  productName={selectedProduct.name}
+                  weight={selectedProduct.weight}
+                  price={selectedProduct.price}
+                  barcode={activeBarcode}
+                  storeName="Chill&Chock"
+                  tagline="Cool vibe sweet bite"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -306,10 +505,20 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-2 px-3 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-100 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            className="py-2 px-3 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-100 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
             <span>Cancel</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={printViaBrowser}
+            className="py-2 px-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            title="Print through Windows printer driver"
+          >
+            <Printer className="w-3.5 h-3.5 text-zinc-600" />
+            <span>Browser Print</span>
           </button>
 
           <button

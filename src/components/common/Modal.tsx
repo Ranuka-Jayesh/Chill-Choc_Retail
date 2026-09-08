@@ -89,7 +89,7 @@ export const Modal: React.FC<ModalProps> = ({
         )}
 
         {/* Modal Body */}
-        <div className={`${bodyClassName} overflow-y-auto flex-1`}>{children}</div>
+        <div className={`${bodyClassName.includes('overflow-') ? '' : 'overflow-y-auto'} ${bodyClassName} flex-1`}>{children}</div>
       </div>
     </div>
   );

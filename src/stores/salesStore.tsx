@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState } from 'react';
-import { CompletedSale, CartItem, Customer, PaymentTender } from '@/types';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { CompletedSale, CartItem, Customer, PaymentTender, Salesperson } from '@/types';
 import { INITIAL_SALES } from '@/data/mockSales';
 import { useCashier } from './cashierStore';
 
@@ -16,6 +16,7 @@ interface SalesContextType {
     tenders: PaymentTender[];
     change: number;
     cashierName: string;
+    salesperson?: Salesperson | null;
   }) => CompletedSale;
   getSaleByInvoice: (invoiceNumber: string) => CompletedSale | undefined;
   setLastCompletedSale: (sale: CompletedSale | null) => void;
@@ -23,10 +24,33 @@ interface SalesContextType {
 
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
+const STORAGE_KEY = 'pos_completed_sales';
+
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { recordSaleCash } = useCashier();
-  const [sales, setSales] = useState<CompletedSale[]>(INITIAL_SALES);
-  const [lastCompletedSale, setLastCompletedSale] = useState<CompletedSale | null>(INITIAL_SALES[0]);
+  const [sales, setSales] = useState<CompletedSale[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load sales from localStorage', e);
+    }
+    return INITIAL_SALES;
+  });
+  const [lastCompletedSale, setLastCompletedSale] = useState<CompletedSale | null>(() => sales[0] || null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sales));
+    } catch (e) {
+      console.error('Failed to save sales to localStorage', e);
+    }
+  }, [sales]);
 
   const completeSale = ({
     items,
@@ -38,6 +62,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     tenders,
     change,
     cashierName,
+    salesperson,
   }: {
     items: CartItem[];
     subtotal: number;
@@ -48,16 +73,22 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     tenders: PaymentTender[];
     change: number;
     cashierName: string;
+    salesperson?: Salesperson | null;
   }) => {
     const nextInvoiceNum = sales.length + 1830;
     const invoiceNumber = `INV-${String(nextInvoiceNum).padStart(6, '0')}`;
+
+    const effectiveItems = items.map((item) => ({
+      ...item,
+      salesperson: item.salesperson || salesperson || null,
+    }));
 
     const newSale: CompletedSale = {
       id: `sale-${Date.now()}`,
       invoiceNumber,
       timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       date: 'Today',
-      items: [...items],
+      items: effectiveItems,
       subtotal,
       discountTotal,
       tax,
@@ -67,6 +98,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       tenders,
       change,
       status: 'Completed',
+      salesperson: salesperson || null,
     };
 
     setSales((prev) => [newSale, ...prev]);

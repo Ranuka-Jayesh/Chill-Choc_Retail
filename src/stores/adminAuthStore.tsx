@@ -37,13 +37,62 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
 
   const login = (username: string, password = ''): boolean => {
-    const cleanUser = username.trim().toLowerCase();
+    const cleanUser = username.trim().toLowerCase().replace(/^@/, '');
     const cleanPass = password.trim();
 
-    // Flexible demo authentication
+    // 1. Check against registered operators in localStorage
+    try {
+      const stored = localStorage.getItem('chill_choc_operators');
+      if (stored) {
+        const ops = JSON.parse(stored);
+        const matched = ops.find((o: any) => {
+          const oEmail = (o.email || '').trim().toLowerCase();
+          const oHandle = (o.handle || '').trim().toLowerCase().replace(/^@/, '');
+          const oName = (o.name || '').trim().toLowerCase();
+          return (
+            (oEmail === cleanUser || oHandle === cleanUser || oName === cleanUser) &&
+            (o.role === 'ADMIN' || o.role === 'MANAGER')
+          );
+        });
+
+        if (matched) {
+          // If operator is blocked, deny login
+          if (matched.status === 'Blocked') {
+            return false;
+          }
+          // Validate password or pin
+          const passMatch =
+            (matched.password && matched.password === cleanPass) ||
+            matched.pin === cleanPass ||
+            cleanPass === 'admin123' ||
+            cleanPass === 'admin';
+
+          if (passMatch) {
+            const user: AdminUser = {
+              id: matched.id,
+              name: matched.name,
+              email: matched.email || (matched.role === 'ADMIN' ? 'admin@chillandchoc.lk' : 'manager@chillchoc.lk'),
+              role: matched.role === 'ADMIN' ? 'Super Admin' : 'Store Manager',
+              avatarInitials: matched.name.slice(0, 2).toUpperCase(),
+            };
+            setIsAdminLoggedIn(true);
+            setAdminUser(user);
+            try {
+              localStorage.setItem('chill_admin_logged_in', 'true');
+              localStorage.setItem('chill_admin_user', JSON.stringify(user));
+            } catch {}
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error checking operator auth', e);
+    }
+
+    // 2. Flexible demo authentication fallback
     if (
       (cleanUser === 'admin' && (cleanPass === 'admin123' || cleanPass === '1234' || cleanPass === 'admin')) ||
-      cleanUser === 'manager' ||
+      (cleanUser === 'manager' && (cleanPass === 'manager123' || cleanPass === '1234' || cleanPass === 'admin')) ||
       cleanPass === '1234' ||
       cleanPass === 'admin'
     ) {

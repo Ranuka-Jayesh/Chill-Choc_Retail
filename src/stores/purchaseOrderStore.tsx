@@ -18,6 +18,7 @@ interface PurchaseOrderContextType {
   addPurchaseOrder: (input: CreatePOInput) => PurchaseOrder;
   getPurchaseOrderById: (id: string) => PurchaseOrder | undefined;
   updatePurchaseOrderStatus: (id: string, status: POPaymentStatus, paidAmount?: number) => void;
+  updatePurchaseOrder: (id: string, updates: Partial<PurchaseOrder>) => void;
   deletePurchaseOrder: (id: string) => void;
 }
 
@@ -203,7 +204,7 @@ export const PurchaseOrderProvider: React.FC<{ children: React.ReactNode }> = ({
       balanceDue,
       paymentStatus,
       paymentBreakdown: input.isCredit
-        ? { cash: 0, card: 0, cheque: 0 }
+        ? { cash: 0, card: 0, cheque: 0, unpaidDueDate: input.paymentBreakdown?.unpaidDueDate }
         : input.paymentBreakdown,
       notes: input.notes || '',
       verifiedBy: input.verifiedBy || 'Store Manager',
@@ -232,6 +233,18 @@ export const PurchaseOrderProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
+  const updatePurchaseOrder = (id: string, updates: Partial<PurchaseOrder>) => {
+    setPurchaseOrders((prev) =>
+      prev.map((po) => {
+        if (po.id !== id) return po;
+        return {
+          ...po,
+          ...updates,
+        };
+      })
+    );
+  };
+
   const deletePurchaseOrder = (id: string) => {
     setPurchaseOrders((prev) => prev.filter((p) => p.id !== id));
   };
@@ -243,6 +256,7 @@ export const PurchaseOrderProvider: React.FC<{ children: React.ReactNode }> = ({
         addPurchaseOrder,
         getPurchaseOrderById,
         updatePurchaseOrderStatus,
+        updatePurchaseOrder,
         deletePurchaseOrder,
       }}
     >
