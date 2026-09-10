@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
 import { Product, ProductBatch, ConfectionCategory } from '@/types';
 import { productSyncSocket } from '@/services/productSyncSocket';
+import { supabase } from '@/services/supabase';
 import {
   fetchProductsFromSupabase,
   upsertProductToSupabase,
@@ -237,7 +238,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Automatically persist products to localStorage on changes
   useEffect(() => {
-    if (typeof window !== 'undefined' && products.length > 0) {
+    if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
       } catch (err) {
@@ -312,32 +313,69 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, []);
 
-  // Fetch initial products from Supabase cloud database
+  // Fetch initial products from Supabase cloud database + Subscribe to Realtime WebSocket
   useEffect(() => {
     let isMounted = true;
     fetchProductsFromSupabase().then((data) => {
-      if (isMounted && Array.isArray(data) && data.length > 0) {
+      if (isMounted && Array.isArray(data)) {
         setProducts(data);
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         } catch {}
+        productSyncSocket.broadcastSyncAll(data);
       }
     });
+
+    const channel = supabase
+      .channel('realtime_products_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        () => {
+          fetchProductsFromSupabase().then((data) => {
+            if (isMounted && Array.isArray(data)) {
+              setProducts(data);
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+              } catch {}
+              productSyncSocket.broadcastSyncAll(data);
+            }
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'product_batches' },
+        () => {
+          fetchProductsFromSupabase().then((data) => {
+            if (isMounted && Array.isArray(data)) {
+              setProducts(data);
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+              } catch {}
+              productSyncSocket.broadcastSyncAll(data);
+            }
+          });
+        }
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, []);
 
-  // Recalculates product stock dynamically whenever batches update
   const addProduct = (productData: AddProductInput): Product => {
     const newId = generateUUID();
     const initialQty = productData.initialStock || 0;
-    const barcode = productData.barcode || `890${Date.now().toString().slice(-9)}`;
+    const randomEntropy = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const barcode = productData.barcode || `890${Date.now().toString().slice(-8)}${Math.floor(10 + Math.random() * 90)}`;
     const cleanName = productData.name.trim();
     const cleanWeight = productData.weight?.trim() || '50g';
     const sku =
       productData.sku ||
-      `CC-${cleanName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase()}-${cleanWeight.replace(/[^0-9]/g, '') || '00'}`;
+      `CC-${cleanName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'ITM'}-${cleanWeight.replace(/[^0-9]/g, '') || '00'}-${randomEntropy}`;
 
     const batches: ProductBatch[] = [];
     if (initialQty > 0) {
@@ -377,11 +415,22 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       supplierName: productData.initialSupplierName,
     };
 
-    setProducts((prev) => [newProduct, ...prev]);
+    setProducts((prev) => {
+      const updated = [newProduct, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      } catch (err) {
+        console.warn('Failed to save to localStorage:', err);
+      }
+      return updated;
+    });
+
     productSyncSocket.broadcastAdd(newProduct);
 
     // Sync to Supabase cloud
-    upsertProductToSupabase(newProduct);
+    upsertProductToSupabase(newProduct).catch((err) => {
+      console.error('Failed to sync new product to Supabase:', err);
+    });
     batches.forEach((b) => insertBatchToSupabase(b));
 
     return newProduct;
@@ -486,9 +535,18 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const deleteProduct = (id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
+    const target = products.find((p) => p.id === id);
+    setProducts((prev) => {
+      const updated = prev.filter((p) => p.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      } catch (err) {
+        console.warn('Failed to save to localStorage:', err);
+      }
+      return updated;
+    });
     productSyncSocket.broadcastDelete(id);
-    deleteProductFromSupabase(id);
+    deleteProductFromSupabase(id, target?.barcode, target?.sku);
   };
 
   const getProductById = (id: string) => {

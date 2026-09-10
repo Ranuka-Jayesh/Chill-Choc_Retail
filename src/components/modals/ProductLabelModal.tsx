@@ -44,7 +44,7 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
     initialProduct?.id || products[0]?.id || ''
   );
   const [selectedBatchId, setSelectedBatchId] = useState<string>('all');
-  const [labelSize, setLabelSize] = useState<LabelSize>('40x20');
+  const [labelSize, setLabelSize] = useState<LabelSize>('30x22');
   const labelType: 'barcode' | 'shelftag' = labelSize === '50x30' ? 'shelftag' : 'barcode';
   const [printerProtocol, setPrinterProtocol] = useState<'escpos' | 'tspl'>('escpos');
   const [copies, setCopies] = useState<number>(1);
@@ -90,7 +90,7 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
       return;
     }
 
-    const cfg = LABEL_SIZE_CONFIGS[labelSize] || LABEL_SIZE_CONFIGS['40x20'];
+    const cfg = LABEL_SIZE_CONFIGS[labelSize] || LABEL_SIZE_CONFIGS['30x22'];
     const formattedPrice = selectedProduct.price.toLocaleString('en-LK', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -406,9 +406,27 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
               <span className="text-[11px] font-bold text-zinc-700 uppercase tracking-wider">
                 Sticker Size
               </span>
-              <span className="px-2 py-0.5 rounded-md bg-black text-white font-mono text-xs font-bold shadow-2xs">
-                40 × 20 mm
-              </span>
+              <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-zinc-200">
+                {ORDERED_LABEL_SIZES.slice(0, 3).map((sizeKey) => {
+                  const sCfg = LABEL_SIZE_CONFIGS[sizeKey];
+                  const isSelected = labelSize === sizeKey;
+                  return (
+                    <button
+                      key={sizeKey}
+                      type="button"
+                      onClick={() => setLabelSize(sizeKey)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-black text-white shadow-2xs'
+                          : 'text-zinc-600 hover:text-black'
+                      }`}
+                      title={sCfg.description}
+                    >
+                      {sCfg.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

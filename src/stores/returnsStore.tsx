@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ReturnRequest, ReturnItem, ExchangeItemDetails } from '@/types';
 import { returnsSyncSocket } from '@/services/returnsSyncSocket';
+import { supabase } from '@/services/supabase';
 import {
   fetchReturnRequestsFromSupabase,
   insertReturnRequestToSupabase,
@@ -81,7 +82,7 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return INITIAL_RETURNS;
   });
 
-  // Fetch initial return requests from Supabase
+  // Fetch initial return requests from Supabase + Subscribe to Realtime WebSocket
   useEffect(() => {
     let isMounted = true;
     fetchReturnRequestsFromSupabase().then((data) => {
@@ -93,8 +94,29 @@ export const ReturnsProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } catch {}
       }
     });
+
+    const channel = supabase
+      .channel('realtime_returns_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'return_requests' },
+        () => {
+          fetchReturnRequestsFromSupabase().then((data) => {
+            if (isMounted && Array.isArray(data)) {
+              const clean = data.filter((r) => !isDummyReturn(r));
+              setReturnRequests(clean);
+              try {
+                localStorage.setItem('chill_choc_return_requests', JSON.stringify(clean));
+              } catch {}
+            }
+          });
+        }
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, []);
 

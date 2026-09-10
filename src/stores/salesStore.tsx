@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { CompletedSale, CartItem, Customer, PaymentTender, Salesperson } from '@/types';
 import { useCashier } from './cashierStore';
+import { supabase } from '@/services/supabase';
 import {
   fetchSalesFromSupabase,
   insertSaleToSupabase,
@@ -56,19 +57,41 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [sales]);
 
-  // Fetch initial sales from Supabase
+  // Fetch initial sales from Supabase + Subscribe to Supabase Realtime WebSocket
   useEffect(() => {
     let isMounted = true;
     fetchSalesFromSupabase().then((data) => {
-      if (isMounted && Array.isArray(data) && data.length > 0) {
+      if (isMounted && Array.isArray(data)) {
         setSales(data);
-        if (!lastCompletedSale) {
-          setLastCompletedSale(data[0] || null);
-        }
+        setLastCompletedSale(data[0] || null);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        } catch {}
       }
     });
+
+    const channel = supabase
+      .channel('realtime_sales_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sales' },
+        () => {
+          fetchSalesFromSupabase().then((data) => {
+            if (isMounted && Array.isArray(data)) {
+              setSales(data);
+              setLastCompletedSale(data[0] || null);
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+              } catch {}
+            }
+          });
+        }
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, []);
 

@@ -4,6 +4,7 @@ import { usePurchaseOrders } from '@/stores/purchaseOrderStore';
 import { useProducts } from '@/stores/productStore';
 import { useToast } from '@/stores/toastStore';
 import { Code39Barcode } from '@/components/pos/Code39Barcode';
+import { formatDateYYYYMMDD } from '@/utils/dateValidator';
 import {
   Package,
   X,
@@ -22,6 +23,7 @@ import {
   Check,
   Ban,
   ArrowRight,
+  Percent,
 } from 'lucide-react';
 
 export interface PurchaseOrderDetailsModalProps {
@@ -64,10 +66,8 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
   const [newChequeDueDate, setNewChequeDueDate] = useState<string>('');
   const [isReplacementApplied, setIsReplacementApplied] = useState<boolean>(false);
 
-  // Editable Line Items
-  const [items, setItems] = useState<PurchaseOrderItem[]>(() => {
-    return (purchaseOrder.items || []).map((it) => ({ ...it }));
-  });
+  // Line Items (Strictly Read-Only as received in GRN)
+  const items = purchaseOrder.items || [];
 
   // Keep state synced if purchaseOrder prop changes
   useEffect(() => {
@@ -83,49 +83,15 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
     setChequeStatus(
       pb.chequeStatus || (pb.cheque && pb.cheque > 0 ? 'PENDING' : 'CLEARED')
     );
-    setItems((purchaseOrder.items || []).map((it) => ({ ...it })));
     setNewChequeNumber('');
     setNewChequeDueDate('');
     setIsReplacementApplied(false);
   }, [purchaseOrder]);
 
-  // Format date helper: YYYY / MM / DD
-  const formatDateYYYYMMDD = (rawVal: string, prevVal: string) => {
-    let digits = rawVal.replace(/\D/g, '');
-    if (rawVal.length < prevVal.length && prevVal.replace(/\D/g, '').length === digits.length) {
-      digits = digits.slice(0, -1);
-    }
-    digits = digits.slice(0, 8);
-
-    let formatted = digits;
-    if (digits.length > 4 && digits.length <= 6) {
-      formatted = `${digits.slice(0, 4)} / ${digits.slice(4)}`;
-    } else if (digits.length > 6) {
-      formatted = `${digits.slice(0, 4)} / ${digits.slice(4, 6)} / ${digits.slice(6)}`;
-    }
-    return formatted;
-  };
-
-  // Line item update
-  const handleUpdateItem = (itemId: string, updates: Partial<PurchaseOrderItem>) => {
-    setItems((prev) =>
-      prev.map((it) => {
-        if (it.id !== itemId) return it;
-        const next = { ...it, ...updates };
-        if (updates.costPrice !== undefined || updates.quantity !== undefined) {
-          const cost = typeof next.costPrice === 'number' ? next.costPrice : 0;
-          const qty = typeof next.quantity === 'number' ? next.quantity : 0;
-          next.subtotal = cost * qty;
-        }
-        return next;
-      })
-    );
-  };
-
   // Financial Calculations
   const totalInvoiced = useMemo(() => {
-    return items.reduce((sum, it) => sum + (it.subtotal || 0), 0);
-  }, [items]);
+    return purchaseOrder.totalInvoiced || items.reduce((sum, it) => sum + (it.subtotal || 0), 0);
+  }, [purchaseOrder.totalInvoiced, items]);
 
   const numCash = parseFloat(cashAmount) || 0;
   const numCard = parseFloat(cardAmount) || 0;
@@ -350,7 +316,7 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
                 <span className="font-bold text-stone-900">{purchaseOrder.supplierName}</span>
               </div>
 
-              {/* Bill Ref # (Editable) */}
+              {/* Bill Ref # (Editable, Clean with no background or box border) */}
               <div className="flex items-center gap-1.5">
                 <span className="text-[9.5px] font-black uppercase tracking-wider text-stone-400">
                   Bill Ref #:
@@ -359,7 +325,9 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
                   type="text"
                   value={invoiceRef}
                   onChange={(e) => setInvoiceRef(e.target.value)}
-                  className="font-mono font-bold text-stone-900 text-[11px] bg-transparent border-0 border-b border-stone-300 focus:border-[#00b4b6] focus:outline-none rounded-none px-1 py-0 w-24"
+                  placeholder="INV-..."
+                  title="Edit Invoice / Bill Reference"
+                  className="font-mono font-bold text-stone-900 text-[11px] bg-transparent border-0 border-b border-stone-300 focus:border-[#00b4b6] focus:outline-none rounded-none px-1 py-0 w-24 transition-colors"
                 />
               </div>
 
@@ -617,7 +585,7 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
             )}
           </div>
 
-          {/* Row 3: Received Line Items Table (with Edit Options) */}
+          {/* Row 3: Received Line Items Table (Read-Only Display with Profit Margin) */}
           <div className="flex-1 min-h-0 overflow-y-auto py-1">
             <table className="table-auto w-full text-left border-collapse text-stone-800 text-[11px]">
               <thead className="sticky top-0 bg-[#FAF7F2] text-[9.5px] font-extrabold uppercase tracking-wider text-stone-400 border-b border-stone-200/80 z-10">
@@ -627,102 +595,81 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
                   <th className="py-1.5 px-2">Batch / Lot #</th>
                   <th className="py-1.5 px-2 text-center">Expiry (YYYY/MM/DD)</th>
                   <th className="py-1.5 px-2 text-right">Cost (Rs.)</th>
+                  <th className="py-1.5 px-2 text-center w-[85px]">
+                    <div className="inline-flex items-center justify-center gap-0.5">
+                      <span>Margin</span>
+                      <Percent className="w-2.5 h-2.5 text-stone-400 stroke-[2.5]" />
+                    </div>
+                  </th>
                   <th className="py-1.5 px-2 text-right">Sell (Rs.)</th>
-                  <th className="py-1.5 px-2 text-center w-[70px]">Qty</th>
+                  <th className="py-1.5 px-2 text-center w-[65px]">Qty</th>
                   <th className="py-1.5 px-2 text-right">Subtotal</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100 font-medium">
-                {items.map((it, idx) => (
-                  <tr key={it.id} className="hover:bg-stone-50 transition-colors">
-                    <td className="py-2 px-2 text-center text-stone-400 font-mono text-[10px]">
-                      #{idx + 1}
-                    </td>
+                {items.map((it, idx) => {
+                  const cost = typeof it.costPrice === 'number' ? it.costPrice : parseFloat(String(it.costPrice)) || 0;
+                  const sell = typeof it.sellingPrice === 'number' ? it.sellingPrice : parseFloat(String(it.sellingPrice)) || 0;
+                  const margin = cost > 0 && sell > 0 ? Math.round((((sell - cost) / cost) * 100) * 10) / 10 : 0;
+                  return (
+                    <tr key={it.id} className="hover:bg-stone-50/80 transition-colors">
+                      <td className="py-2.5 px-2 text-center text-stone-400 font-mono text-[10px]">
+                        #{idx + 1}
+                      </td>
 
-                    {/* Product Name (Strict Single Line) */}
-                    <td className="py-1.5 px-2 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 leading-none">
-                        <span className="font-bold text-stone-900 text-[11px] truncate max-w-[200px]" title={it.productName}>
-                          {it.productName}
-                        </span>
-                        {it.weight && (
-                          <span className="text-[9.5px] text-stone-400 font-normal font-mono shrink-0">
-                            ({it.weight})
+                      {/* Product Name (Strict Single Line) */}
+                      <td className="py-2.5 px-2 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 leading-none">
+                          <span className="font-bold text-stone-900 text-[11px] truncate max-w-[220px]" title={it.productName}>
+                            {it.productName}
                           </span>
-                        )}
-                      </div>
-                    </td>
+                          {it.weight && (
+                            <span className="text-[9.5px] text-stone-400 font-normal font-mono shrink-0">
+                              ({it.weight})
+                            </span>
+                          )}
+                        </div>
+                      </td>
 
-                    {/* Batch / Lot # (Editable) */}
-                    <td className="py-2 px-2">
-                      <input
-                        type="text"
-                        value={it.batchNumber}
-                        onChange={(e) => handleUpdateItem(it.id, { batchNumber: e.target.value })}
-                        className="bg-transparent border-0 border-b border-stone-200 focus:border-[#00b4b6] focus:outline-none rounded-none font-mono font-bold text-stone-800 text-[11px] w-28 py-0.5 px-1 transition-colors"
-                      />
-                    </td>
+                      {/* Batch / Lot # (Read-Only) */}
+                      <td className="py-2.5 px-2 font-mono font-bold text-stone-800 text-[11px] select-all">
+                        {it.batchNumber || '-'}
+                      </td>
 
-                    {/* Expiry Date (Editable) */}
-                    <td className="py-2 px-2 text-center">
-                      <input
-                        type="text"
-                        value={it.expiryDate || ''}
-                        onChange={(e) =>
-                          handleUpdateItem(it.id, {
-                            expiryDate: formatDateYYYYMMDD(e.target.value, it.expiryDate || ''),
-                          })
-                        }
-                        placeholder="YYYY / MM / DD"
-                        className="bg-transparent border-0 border-b border-stone-200 focus:border-[#00b4b6] focus:outline-none rounded-none font-mono text-stone-700 text-[11px] w-28 text-center py-0.5 px-1 transition-colors"
-                      />
-                    </td>
+                      {/* Expiry Date (Read-Only) */}
+                      <td className="py-2.5 px-2 text-center font-mono text-stone-700 text-[11px]">
+                        {it.expiryDate || '-'}
+                      </td>
 
-                    {/* Cost Price (Editable) */}
-                    <td className="py-2 px-2 text-right">
-                      <input
-                        type="number"
-                        min="0"
-                        value={it.costPrice}
-                        onChange={(e) =>
-                          handleUpdateItem(it.id, { costPrice: parseFloat(e.target.value) || 0 })
-                        }
-                        className="w-20 bg-transparent border-0 border-b border-stone-200 focus:border-[#00b4b6] focus:outline-none rounded-none font-mono font-bold text-stone-900 text-[11px] text-right py-0.5 px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-                      />
-                    </td>
+                      {/* Cost Price (Read-Only) */}
+                      <td className="py-2.5 px-2 text-right font-mono font-bold text-stone-900 text-[11px]">
+                        {cost.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
 
-                    {/* Selling Price (Editable) */}
-                    <td className="py-2 px-2 text-right">
-                      <input
-                        type="number"
-                        min="0"
-                        value={it.sellingPrice}
-                        onChange={(e) =>
-                          handleUpdateItem(it.id, { sellingPrice: parseFloat(e.target.value) || 0 })
-                        }
-                        className="w-20 bg-transparent border-0 border-b border-stone-200 focus:border-[#00b4b6] focus:outline-none rounded-none font-mono font-bold text-orange-600 text-[11px] text-right py-0.5 px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-                      />
-                    </td>
+                      {/* Margin % (Read-Only, Clean with no background or border) */}
+                      <td className="py-2.5 px-2 text-center font-mono font-bold text-[11px]">
+                        <span className={margin > 0 ? 'text-emerald-600 font-extrabold' : margin < 0 ? 'text-rose-600 font-extrabold' : 'text-stone-500'}>
+                          {margin > 0 ? `+${margin}%` : `${margin}%`}
+                        </span>
+                      </td>
 
-                    {/* Quantity (Editable) */}
-                    <td className="py-2 px-2 text-center">
-                      <input
-                        type="number"
-                        min="1"
-                        value={it.quantity}
-                        onChange={(e) =>
-                          handleUpdateItem(it.id, { quantity: parseInt(e.target.value) || 1 })
-                        }
-                        className="w-12 bg-transparent border-0 border-b border-stone-200 focus:border-[#00b4b6] focus:outline-none rounded-none font-mono font-black text-stone-900 text-[11px] text-center py-0.5 px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-                      />
-                    </td>
+                      {/* Selling Price (Read-Only) */}
+                      <td className="py-2.5 px-2 text-right font-mono font-bold text-orange-600 text-[11px]">
+                        {sell.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
 
-                    {/* Subtotal */}
-                    <td className="py-2 px-2 text-right font-mono font-bold text-stone-900 whitespace-nowrap">
-                      Rs. {it.subtotal.toLocaleString('en-LK', { minimumFractionDigits: 2 })}
-                    </td>
-                  </tr>
-                ))}
+                      {/* Quantity (Read-Only) */}
+                      <td className="py-2.5 px-2 text-center font-mono font-black text-stone-900 text-[11px]">
+                        {it.quantity}
+                      </td>
+
+                      {/* Subtotal */}
+                      <td className="py-2.5 px-2 text-right font-mono font-bold text-stone-900 whitespace-nowrap">
+                        Rs. {it.subtotal.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

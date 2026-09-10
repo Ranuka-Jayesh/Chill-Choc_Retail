@@ -262,15 +262,17 @@ export const CashierHeader: React.FC<CashierHeaderProps> = ({
                 ? "Printer Ready (ws://127.0.0.1:17891)"
                 : isReconnecting
                 ? "Connecting to Printer..."
-                : "Printer Offline (ws://127.0.0.1:17891) - Click to reconnect"
+                : "Printer Offline / Not Connected (ws://127.0.0.1:17891) - Click to reconnect"
             }
             className={`flex items-center justify-center transition-colors ${
               isConnected
                 ? 'text-emerald-600 cursor-default'
-                : 'text-amber-600 hover:text-amber-700 cursor-pointer'
+                : isReconnecting
+                ? 'text-amber-500 hover:text-amber-600 cursor-wait'
+                : 'text-rose-500 hover:text-rose-600 cursor-pointer'
             }`}
           >
-            <Printer className={`w-3.5 h-3.5 ${isReconnecting ? 'animate-spin' : ''}`} />
+            <Printer className={`w-3.5 h-3.5 ${isReconnecting ? 'animate-spin text-amber-500' : ''}`} />
           </button>
         </div>
 

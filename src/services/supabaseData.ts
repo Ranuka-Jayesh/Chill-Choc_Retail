@@ -189,15 +189,70 @@ export async function fetchProductsFromSupabase(): Promise<Product[]> {
   }
 }
 
+export interface SupabaseCategory {
+  id?: string;
+  slug: string;
+  name: string;
+  icon_name?: string;
+  color_code?: string;
+  display_order?: number;
+}
+
+export const DEFAULT_CONFECTION_CATEGORIES: SupabaseCategory[] = [
+  { slug: 'chocolate', name: 'Chocolates & Truffles', icon_name: 'Candy', color_code: '#78350F', display_order: 1 },
+  { slug: 'toffees', name: 'Toffees & Candies', icon_name: 'Cookie', color_code: '#D97706', display_order: 2 },
+  { slug: 'biscuits', name: 'Biscuits & Wafers', icon_name: 'Cake', color_code: '#B45309', display_order: 3 },
+  { slug: 'drinks', name: 'Beverages & Shakes', icon_name: 'CupSoda', color_code: '#0284C7', display_order: 4 },
+  { slug: 'gifts', name: 'Gifting & Hampers', icon_name: 'Gift', color_code: '#E11D48', display_order: 5 },
+  { slug: 'ice_cream', name: 'Ice Creams', icon_name: 'IceCream', color_code: '#EC4899', display_order: 6 },
+  { slug: 'others', name: 'Other Confections', icon_name: 'Package', color_code: '#6B7280', display_order: 7 },
+];
+
+export async function fetchCategoriesFromSupabase(): Promise<SupabaseCategory[]> {
+  try {
+    const { data, error } = await supabase
+      .from('confection_categories')
+      .select('*')
+      .order('display_order', { ascending: true });
+
+    if (error) {
+      console.warn('Supabase fetch categories error:', error.message);
+      return [];
+    }
+    return data || [];
+  } catch (err) {
+    console.warn('Supabase fetch categories failed:', err);
+    return [];
+  }
+}
+
+export async function ensureCategoryExistsInSupabase(slug: string, name?: string, icon?: string): Promise<void> {
+  try {
+    const cleanSlug = (slug || 'others').toLowerCase().trim();
+    const displayName = name || (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1).replace(/_/g, ' '));
+    await supabase.from('confection_categories').upsert({
+      slug: cleanSlug,
+      name: displayName,
+      icon_name: icon || 'Tag',
+      color_code: '#78350F',
+    }, { onConflict: 'slug' });
+  } catch (err) {
+    console.warn('Failed to ensure category exists in Supabase:', err);
+  }
+}
+
 export async function upsertProductToSupabase(p: Product) {
   try {
     const id = isValidUUID(p.id) ? p.id : generateUUID();
+    const categorySlug = (p.category || 'others').toLowerCase().trim();
+    await ensureCategoryExistsInSupabase(categorySlug);
+
     const { data, error } = await supabase.from('products').upsert({
       id,
       name: p.name,
       sku: p.sku,
       barcode: p.barcode,
-      category_slug: p.category || 'others',
+      category_slug: categorySlug,
       weight: p.weight,
       price: p.price,
       cost_price: p.costPrice || 0,
@@ -210,21 +265,73 @@ export async function upsertProductToSupabase(p: Product) {
       supplier_id: isValidUUID(p.supplierId) ? p.supplierId : null,
     }, { onConflict: 'id' }).select().single();
 
-    if (error) console.warn('Supabase upsert product error:', error.message);
+    if (error) {
+      console.error('Supabase upsert product error:', error.message);
+      return null;
+    }
     return data;
   } catch (err) {
-    console.warn('Supabase upsert product failed:', err);
+    console.error('Supabase upsert product failed:', err);
     return null;
   }
 }
 
-export async function deleteProductFromSupabase(id: string) {
+export async function deleteCategoryFromSupabase(slug: string): Promise<boolean> {
   try {
-    if (!isValidUUID(id)) return;
-    const { error } = await supabase.from('products').delete().eq('id', id);
+    const cleanSlug = (slug || '').toLowerCase().trim();
+    if (!cleanSlug || cleanSlug === 'all') return false;
+
+    // Ensure 'others' fallback category exists first
+    await ensureCategoryExistsInSupabase('others', 'Other Confections', 'Package');
+
+    // First update any products in this category to 'others' so foreign key doesn't block
+    await supabase
+      .from('products')
+      .update({ category_slug: 'others' })
+      .eq('category_slug', cleanSlug);
+
+    const { error } = await supabase
+      .from('confection_categories')
+      .delete()
+      .eq('slug', cleanSlug);
+
+    if (error) {
+      console.warn('Supabase delete category error:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase delete category failed:', err);
+    return false;
+  }
+}
+
+export async function deleteProductFromSupabase(id: string, barcode?: string, sku?: string) {
+  try {
+    // 1. Delete associated batches first
+    if (isValidUUID(id)) {
+      await supabase.from('product_batches').delete().eq('product_id', id);
+    }
+
+    // 2. Delete product record
+    let query = supabase.from('products').delete();
+    if (isValidUUID(id)) {
+      query = query.eq('id', id);
+    } else {
+      const matchers: string[] = [];
+      if (barcode) matchers.push(`barcode.eq.${barcode}`);
+      if (sku) matchers.push(`sku.eq.${sku}`);
+      matchers.push(`id.eq.${id}`);
+      matchers.push(`barcode.eq.${id}`);
+      matchers.push(`sku.eq.${id}`);
+      query = query.or(matchers.join(','));
+    }
+    const { data, error } = await query.select();
     if (error) console.warn('Supabase delete product error:', error.message);
+    return data;
   } catch (err) {
     console.warn('Supabase delete product failed:', err);
+    return null;
   }
 }
 

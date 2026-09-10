@@ -78,13 +78,19 @@ export const StaffProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     let isMounted = true;
     fetchStaffFromSupabase().then((data) => {
-      if (isMounted && Array.isArray(data) && data.length > 0) {
+      if (isMounted && Array.isArray(data)) {
         setStaffList(data);
+        try {
+          localStorage.setItem('chill_choc_staff_members', JSON.stringify(data));
+        } catch {}
       }
     });
     fetchPayrollFromSupabase().then((data) => {
-      if (isMounted && Array.isArray(data) && data.length > 0) {
+      if (isMounted && Array.isArray(data)) {
         setPayrollHistory(data);
+        try {
+          localStorage.setItem('chill_choc_payroll_history', JSON.stringify(data));
+        } catch {}
       }
     });
     return () => {

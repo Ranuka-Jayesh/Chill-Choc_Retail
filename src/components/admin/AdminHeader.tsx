@@ -122,15 +122,30 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
             onClick={async () => {
               if (isConnected || isReconnecting) return;
               setIsReconnecting(true);
-              await reconnect();
-              setIsReconnecting(false);
+              try {
+                await reconnect();
+              } catch {
+                // Handled in store
+              } finally {
+                setIsReconnecting(false);
+              }
             }}
-            title={isConnected ? "Receipt Printer: Ready" : "Receipt Printer: Click to connect"}
+            title={
+              isConnected
+                ? "Printer Agent: Connected & Ready"
+                : isReconnecting
+                ? "Connecting to Print Service Agent..."
+                : "Printer Agent: Disconnected / Not Running (Click to reconnect)"
+            }
             className={`flex items-center justify-center transition-colors cursor-pointer ${
-              isConnected ? 'text-emerald-600' : 'text-emerald-600 hover:text-black'
+              isConnected
+                ? 'text-emerald-600 hover:text-emerald-700'
+                : isReconnecting
+                ? 'text-amber-500 hover:text-amber-600'
+                : 'text-rose-500 hover:text-rose-600'
             }`}
           >
-            <Printer className="w-3.5 h-3.5 stroke-[2.2]" />
+            <Printer className={`w-3.5 h-3.5 stroke-[2.2] ${isReconnecting ? 'animate-spin text-amber-500' : ''}`} />
           </button>
         </div>
 

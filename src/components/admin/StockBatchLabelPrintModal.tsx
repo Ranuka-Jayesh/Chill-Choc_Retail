@@ -63,7 +63,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
   const { products } = useProducts();
   const { showToast } = useToast();
 
-  const [labelSize, setLabelSize] = useState<LabelSize>('40x20');
+  const [labelSize, setLabelSize] = useState<LabelSize>('30x22');
   const labelType: 'barcode' | 'shelftag' = labelSize === '50x30' ? 'shelftag' : 'barcode';
   // Printer command protocol: 'escpos' (Xprinter XP-80TS) vs 'tspl' (dedicated label printers)
   const [printerProtocol, setPrinterProtocol] = useState<'escpos' | 'tspl'>('escpos');
@@ -171,7 +171,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
       return;
     }
 
-    const cfg = LABEL_SIZE_CONFIGS[labelSize] || LABEL_SIZE_CONFIGS['40x20'];
+    const cfg = LABEL_SIZE_CONFIGS[labelSize] || LABEL_SIZE_CONFIGS['30x22'];
 
     let htmlContent = `
       <!DOCTYPE html>
@@ -489,9 +489,29 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             </div>
 
             {/* Right: Format Selector & Printer Mode */}
-            <div className="flex items-center flex-wrap gap-3 shrink-0">
-
-
+            <div className="flex items-center flex-wrap gap-2.5 shrink-0">
+              {/* Label Size Selector */}
+              <div className="flex items-center gap-1 bg-stone-100 p-0.5 rounded-full border border-stone-200">
+                {ORDERED_LABEL_SIZES.slice(0, 3).map((sizeKey) => {
+                  const sCfg = LABEL_SIZE_CONFIGS[sizeKey];
+                  const isSelected = labelSize === sizeKey;
+                  return (
+                    <button
+                      key={sizeKey}
+                      type="button"
+                      onClick={() => setLabelSize(sizeKey)}
+                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-black text-white shadow-2xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                      title={sCfg.description}
+                    >
+                      <span>{sCfg.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
 
               {/* Printer Mode: XP-80TS (ESC/POS) vs TSPL */}
               <div className="flex items-center gap-1 bg-stone-100 p-0.5 rounded-full border border-stone-200">
@@ -674,14 +694,14 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
               return (
                 <div className="w-full lg:w-[320px] shrink-0 bg-white rounded-2xl p-3.5 border border-stone-200 flex flex-col justify-between shadow-2xs">
                   <div>
-                    {/* Header with Title and Fixed 40x20 Standard Size Badge */}
+                    {/* Header with Title and Dynamic Size Badge */}
                     <div className="flex items-center justify-between pb-2 mb-2 border-b border-stone-100">
                       <span className="text-[10px] font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
                         <Eye className="w-3.5 h-3.5 text-stone-500" />
                         <span>Sticker Preview</span>
                       </span>
                       <span className="px-2 py-0.5 rounded-md bg-stone-900 text-white font-mono text-[10px] font-bold tracking-tight shadow-2xs">
-                        40 × 20 mm
+                        {cfg.name}
                       </span>
                     </div>
 
@@ -735,7 +755,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             <div className="flex items-center gap-2 text-[10.5px] text-stone-500">
               <span className="font-bold text-stone-700">Xprinter Setup:</span>
               <span>
-                Insert your 35x25mm, 40x30mm, or 50x30mm label roll into your printer. Calibrate the 2mm gap sensor if needed.
+                Insert your 30x22mm or 40x20mm label roll into your printer. Calibrate the 2mm gap sensor if needed.
               </span>
             </div>
 

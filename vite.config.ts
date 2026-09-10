@@ -153,7 +153,7 @@ function posWebSocketSyncPlugin(): Plugin {
       cashWss.on('connection', (ws) => {
         console.log(`[POS-WS Cash] Client connected. Active: ${cashWss!.clients.size}`);
 
-        if (cachedCashState) {
+        if (cachedCashState && (cachedCashState.session || (Array.isArray(cachedCashState.movements) && cachedCashState.movements.length > 0))) {
           try {
             ws.send(JSON.stringify({ type: 'SYNC_CASH_STATE', payload: cachedCashState }));
           } catch (e) {

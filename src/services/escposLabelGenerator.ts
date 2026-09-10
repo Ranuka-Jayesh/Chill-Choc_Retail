@@ -1,7 +1,7 @@
 import { Product } from '@/types';
 import { extractProductMeasurement } from './labelConfig';
 
-export type LabelSize = '30x20' | '35x25' | '40x20' | '40x25' | '40x30' | '50x30';
+export type LabelSize = '30x20' | '30x22' | '35x25' | '40x20' | '40x25' | '40x30' | '50x30';
 
 export interface ESCPOSLabelOptions {
   copies?: number;
@@ -152,7 +152,7 @@ function wrapProductTitle(text: string, maxPerLine: number = 28): string[] {
  */
 export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOptions = {}): string {
   const copies = Math.max(1, options.copies || 1);
-  const labelSize = options.labelSize || '40x20';
+  const labelSize = options.labelSize || '30x22';
   const storeName = (options.storeName || 'Chill&Chock').trim();
   const tagline = 'Cool vibe sweet bite';
 
@@ -193,6 +193,8 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
   let barcodeHeightHex = '\x30'; // 48 dots default (6.0 mm)
   if (labelSize === '30x20' || labelSize === '40x20') {
     barcodeHeightHex = '\x30'; // 48 dots (6.0 mm)
+  } else if (labelSize === '30x22') {
+    barcodeHeightHex = '\x34'; // 52 dots (6.5 mm) - responsive extra clearance
   } else if (labelSize === '35x25' || labelSize === '40x25') {
     barcodeHeightHex = '\x40'; // 64 dots (8.0 mm)
   } else if (labelSize === '40x30' || labelSize === '50x30') {
@@ -206,11 +208,11 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
   const code128Data = `{B${cleanBarcode}`;
   const BARCODE_PRINT = `${GS}k\x49${String.fromCharCode(code128Data.length)}${code128Data}`;
 
-  const CMD_FEED = labelSize === '30x20' || labelSize === '40x20' ? `${ESC}d\x01` : `${ESC}d\x02`;
+  const CMD_FEED = labelSize === '30x20' || labelSize === '30x22' || labelSize === '40x20' ? `${ESC}d\x01` : `${ESC}d\x02`;
   const CMD_FEED_SEPARATION = `${ESC}d\x01`;
 
   const { cleanTitle, measurement } = extractProductMeasurement(cleanName, cleanWeight);
-  const titleLines = wrapProductTitle(cleanTitle, labelSize === '30x20' ? 22 : 28);
+  const titleLines = wrapProductTitle(cleanTitle, labelSize === '30x20' || labelSize === '30x22' ? 22 : 28);
   const measurementSuffix = measurement ? ` / ${measurement}` : '';
 
   const singleLabel = [
@@ -218,8 +220,8 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
     CMD_LINE_SPACING_RESET,
     // 1. Shop Name: Bold, largest brand text, horizontally centered
     `${FONT_BRAND}${storeName}${FONT_NORMAL}\n`,
-    // 2. Tagline: Much smaller than shop name, regular/medium (omitted on 20mm labels for barcode safety)
-    ...(labelSize !== '30x20' && labelSize !== '40x20' ? [`${FONT_SMALL}${tagline}${FONT_NORMAL}\n`] : []),
+    // 2. Tagline: Much smaller than shop name, regular/medium (omitted on 20mm/22mm labels for barcode safety)
+    ...(labelSize !== '30x20' && labelSize !== '30x22' && labelSize !== '40x20' ? [`${FONT_SMALL}${tagline}${FONT_NORMAL}\n`] : []),
     // 3. Product Name: Bold font, centered, max 2 lines
     ...titleLines.map((line) => `${FONT_BOLD}${line}${FONT_NORMAL}\n`),
     // 4. Price: Very bold, large, prominent

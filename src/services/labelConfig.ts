@@ -59,6 +59,33 @@ export const LABEL_SIZE_CONFIGS: Record<LabelSize, LabelSizeDefinition> = {
     previewBarcodeHeight: 24,
     previewBarcodeTextClass: 'font-mono font-bold text-[10px] text-black leading-none tracking-wider mt-1',
   },
+  '30x22': {
+    id: '30x22',
+    name: '30 × 22 mm',
+    widthMm: 30,
+    heightMm: 22,
+    badge: 'Responsive Mini',
+    badgeClass: 'bg-zinc-100 text-zinc-900 border-zinc-300',
+    badgeActiveRing: 'ring-black',
+    description: 'Perfect responsive mini retail sticker with 2mm extra height for clean barcode clearance',
+    showTagline: false,
+    brandFontSizePt: 6.8,
+    taglineFontSizePt: 0,
+    titleFontSizePt: 6.5,
+    priceFontSizePt: 9.5,
+    barcodeSvgHeight: 28,
+    barcodeMaxBarWidth: 165,
+    barcodeFontSizePt: 4.8,
+    pagePadding: '0.5mm 0.8mm',
+    previewWidthPx: 255,
+    previewHeightPx: 187,
+    previewBrandClass: 'font-sans font-black text-[18px] text-black leading-none tracking-tight',
+    previewTaglineClass: 'hidden',
+    previewTitleClass: 'font-sans font-bold text-[12px] text-black leading-tight mt-1',
+    previewPriceClass: 'font-sans font-black text-[19px] text-black leading-none tracking-tight mt-1',
+    previewBarcodeHeight: 32,
+    previewBarcodeTextClass: 'font-mono font-bold text-[10px] text-black leading-none tracking-wider mt-1',
+  },
   '30x20': {
     id: '30x20',
     name: '30 × 20 mm',
@@ -197,7 +224,13 @@ export const LABEL_SIZE_CONFIGS: Record<LabelSize, LabelSizeDefinition> = {
 };
 
 export const ORDERED_LABEL_SIZES: LabelSize[] = [
+  '30x22',
   '40x20',
+  '30x20',
+  '35x25',
+  '40x25',
+  '40x30',
+  '50x30',
 ];
 
 /**

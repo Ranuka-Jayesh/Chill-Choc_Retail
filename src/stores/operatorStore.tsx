@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { OperatorCredential, OperatorRole } from '@/types';
 import { operatorSyncSocket, OperatorSyncMessage } from '@/services/operatorSyncSocket';
+import { supabase } from '@/services/supabase';
 import {
   fetchOperatorsFromSupabase,
   insertOperatorToSupabase,
@@ -55,17 +56,35 @@ export const OperatorProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Fetch initial operators from Supabase cloud database
+  // Fetch initial operators from Supabase cloud database + Subscribe to Realtime WebSocket
   useEffect(() => {
     let isMounted = true;
     fetchOperatorsFromSupabase().then((data) => {
-      if (isMounted && Array.isArray(data) && data.length > 0) {
+      if (isMounted && Array.isArray(data)) {
         setOperators(data);
         persistOperators(data);
       }
     });
+
+    const channel = supabase
+      .channel('realtime_operators_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'operators' },
+        () => {
+          fetchOperatorsFromSupabase().then((data) => {
+            if (isMounted && Array.isArray(data)) {
+              setOperators(data);
+              persistOperators(data);
+            }
+          });
+        }
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, []);
 

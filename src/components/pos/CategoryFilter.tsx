@@ -3,6 +3,8 @@ import { ConfectionCategory } from '@/types';
 import { Layers, Tag } from 'lucide-react';
 import { useProducts } from '@/stores/productStore';
 
+import { DEFAULT_CONFECTION_CATEGORIES } from '@/services/supabaseData';
+
 interface CategoryFilterProps {
   selectedCategory: ConfectionCategory;
   onSelectCategory: (category: ConfectionCategory) => void;
@@ -21,6 +23,7 @@ export const CategoryFilter: React.FC<CategoryFilterProps> = ({
     const list: Array<{ id: ConfectionCategory; label: string }> = [
       { id: 'all', label: 'All Items' },
     ];
+
 
     try {
       const saved = localStorage.getItem('chill_choc_category_items_v2');

@@ -4,7 +4,7 @@ import { useAdminAuth } from '@/stores/adminAuthStore';
 import { useOperators } from '@/stores/operatorStore';
 import { useReturns } from '@/stores/returnsStore';
 import { useToast } from '@/stores/toastStore';
-import { ShieldCheck, KeyRound, User, Lock, ArrowRight, UserPlus, Mail, ShieldAlert } from 'lucide-react';
+import { ArrowRight, ShieldAlert } from 'lucide-react';
 import { AppFooter } from '@/components/common/AppFooter';
 
 export const AdminLogin: React.FC = () => {
@@ -114,196 +114,202 @@ export const AdminLogin: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-zinc-50 flex flex-col justify-between items-center p-4 select-none font-sans">
-      {/* Top Bar */}
-      <header className="w-full max-w-5xl h-14 flex items-center justify-between">
+    <div
+      className="h-screen w-screen relative flex flex-col justify-between select-none font-sans overflow-hidden"
+      style={{
+        backgroundImage: "url('/loginadmin.png')",
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
+      {/* Dark gradient overlay for contrast and typography clarity */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/70 pointer-events-none z-0" />
+
+      {/* Top Header Bar */}
+      <header className="w-full h-14 px-6 sm:px-8 flex justify-between items-center z-10 relative">
         <div className="flex items-center gap-2.5">
-          <img src="/logo.png" alt="Chill & Choc Logo" className="h-8 w-auto object-contain" />
-          <span className="text-sm font-black text-[#27140B] tracking-tight">
+          <img src="/logo.png" alt="Chill & Choc Logo" className="h-8 w-auto object-contain drop-shadow-md" />
+          <span className="text-sm font-black text-white tracking-tight drop-shadow-sm">
             CHILL <span className="text-[#FF5500]">&amp;</span> CHOC
+          </span>
+          <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-0.5 rounded-full bg-white/10 text-orange-400 border border-white/10 ml-1">
+            Admin Portal
           </span>
         </div>
       </header>
 
-      {/* Center Card */}
-      <main className="w-full max-w-md my-auto py-8">
-        {!hasAnyAdmin ? (
-          /* INITIAL SETUP: ZERO OPERATORS EXIST */
-          <div className="bg-white rounded-3xl border border-zinc-200 shadow-xl p-7 sm:p-9 space-y-6 animate-in zoom-in-95 duration-200">
-            <div className="text-center space-y-2">
-              <div className="w-16 h-16 rounded-2xl bg-orange-50 border border-orange-200/80 mx-auto flex items-center justify-center shadow-xs">
-                <UserPlus className="w-8 h-8 text-[#FF5500]" />
-              </div>
-              <h2 className="text-2xl font-black text-[#27140B] tracking-tight">
-                Initial System Setup
-              </h2>
-              <p className="text-xs text-zinc-500 font-medium max-w-xs mx-auto">
-                No administrator accounts exist. Create your primary Super Administrator account to configure the system.
-              </p>
-            </div>
-
-            <form onSubmit={handleInitialSetup} className="space-y-3.5">
-              {error && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700 animate-in fade-in duration-100 flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 shrink-0 text-rose-500" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Full Name</span>
-                </label>
-                <input
-                  type="text"
-                  value={setupName}
-                  onChange={(e) => setSetupName(e.target.value)}
-                  placeholder="e.g. Store Owner"
-                  required
-                  className="w-full h-10 px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 bg-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-transparent transition-all"
+      {/* Center Frameless Content Area */}
+      <main className="flex-1 flex items-center justify-center px-4 w-full relative z-10">
+        <div className="w-full max-w-[340px] sm:max-w-[380px] bg-transparent border-none shadow-none flex flex-col items-center animate-in zoom-in-95 duration-200">
+          {!hasAnyAdmin ? (
+            /* INITIAL SETUP: ZERO OPERATORS EXIST */
+            <div className="w-full space-y-7">
+              <div className="flex flex-col items-center text-center">
+                <img
+                  src="/logobg.webp"
+                  alt="Chill & Choc Logo"
+                  className="w-20 h-20 sm:w-24 sm:h-24 object-contain drop-shadow-xl mb-2 select-none pointer-events-none"
                 />
+                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight drop-shadow-sm">
+                  Initial Setup
+                </h2>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-zinc-700">Username / Handle</label>
+              <form onSubmit={handleInitialSetup} className="space-y-5 w-full">
+                {error && (
+                  <div className="w-full p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                    <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                {/* Full Name */}
+                <div className="w-full border-b-2 border-white/30 focus-within:border-[#FF5500] transition-colors pb-1">
                   <input
                     type="text"
-                    value={setupHandle}
-                    onChange={(e) => setSetupHandle(e.target.value)}
-                    placeholder="@admin"
+                    value={setupName}
+                    onChange={(e) => setSetupName(e.target.value)}
+                    placeholder="Full Name"
                     required
-                    className="w-full h-10 px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 bg-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-transparent transition-all"
+                    className="w-full bg-transparent text-white placeholder:text-zinc-400 text-sm font-medium outline-none border-none py-1.5"
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-zinc-700 flex items-center gap-1">
-                    <KeyRound className="w-3.5 h-3.5 text-zinc-400" />
-                    <span>4-Digit PIN</span>
-                  </label>
+
+                {/* Username & PIN Grid */}
+                <div className="grid grid-cols-2 gap-4 w-full">
+                  <div className="w-full border-b-2 border-white/30 focus-within:border-[#FF5500] transition-colors pb-1">
+                    <input
+                      type="text"
+                      value={setupHandle}
+                      onChange={(e) => setSetupHandle(e.target.value)}
+                      placeholder="Username (@admin)"
+                      required
+                      className="w-full bg-transparent text-white placeholder:text-zinc-400 text-sm font-medium outline-none border-none py-1.5"
+                    />
+                  </div>
+                  <div className="w-full border-b-2 border-white/30 focus-within:border-[#FF5500] transition-colors pb-1">
+                    <input
+                      type="password"
+                      maxLength={4}
+                      value={setupPin}
+                      onChange={(e) => setSetupPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder="4-Digit PIN"
+                      required
+                      className="w-full bg-transparent text-white placeholder:text-zinc-400 text-sm font-medium outline-none border-none py-1.5 tracking-widest text-center"
+                    />
+                  </div>
+                </div>
+
+                {/* Email */}
+                <div className="w-full border-b-2 border-white/30 focus-within:border-[#FF5500] transition-colors pb-1">
+                  <input
+                    type="email"
+                    value={setupEmail}
+                    onChange={(e) => setSetupEmail(e.target.value)}
+                    placeholder="Administrator Email"
+                    required
+                    className="w-full bg-transparent text-white placeholder:text-zinc-400 text-sm font-medium outline-none border-none py-1.5"
+                  />
+                </div>
+
+                {/* Password */}
+                <div className="w-full border-b-2 border-white/30 focus-within:border-[#FF5500] transition-colors pb-1">
                   <input
                     type="password"
-                    maxLength={4}
-                    value={setupPin}
-                    onChange={(e) => setSetupPin(e.target.value.replace(/\D/g, ''))}
-                    placeholder="e.g. 1234"
+                    value={setupPassword}
+                    onChange={(e) => setSetupPassword(e.target.value)}
+                    placeholder="Password"
                     required
-                    className="w-full h-10 px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 bg-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-transparent transition-all tracking-widest text-center"
+                    className="w-full bg-transparent text-white placeholder:text-zinc-400 text-sm font-medium outline-none border-none py-1.5 tracking-wider"
                   />
                 </div>
-              </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Administrator Email</span>
-                </label>
-                <input
-                  type="email"
-                  value={setupEmail}
-                  onChange={(e) => setSetupEmail(e.target.value)}
-                  placeholder="admin@chillandchoc.lk"
-                  required
-                  className="w-full h-10 px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 bg-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-transparent transition-all"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Password</span>
-                </label>
-                <input
-                  type="password"
-                  value={setupPassword}
-                  onChange={(e) => setSetupPassword(e.target.value)}
-                  placeholder="Enter strong password"
-                  required
-                  className="w-full h-10 px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 bg-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-transparent transition-all"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full h-11 mt-2 rounded-xl bg-[#FF5500] hover:bg-[#e04b00] text-white text-xs font-black tracking-wide transition-all duration-150 flex items-center justify-center gap-2 shadow-md cursor-pointer hover:shadow-lg active:scale-98"
-              >
-                <span>Create Super Admin &amp; Enter</span>
-                <ArrowRight className="w-4 h-4 text-white" />
-              </button>
-            </form>
-          </div>
-        ) : (
-          /* REGULAR LOGIN FORM */
-          <div className="bg-white rounded-3xl border border-zinc-200 shadow-xl p-7 sm:p-9 space-y-6 animate-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="text-center space-y-2">
-              <div className="w-16 h-16 rounded-2xl bg-orange-50 border border-orange-200/80 mx-auto flex items-center justify-center shadow-xs">
-                <ShieldCheck className="w-8 h-8 text-[#FF5500]" />
-              </div>
-              <h2 className="text-2xl font-black text-[#27140B] tracking-tight">
-                Admin Portal
-              </h2>
-              <p className="text-xs text-zinc-400 font-medium max-w-xs mx-auto">
-                Centralized inventory, multi-supplier restocking, refund approvals &amp; audits
-              </p>
-            </div>
-
-            {/* Form */}
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
-              {error && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700 animate-in fade-in duration-100 flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 shrink-0 text-rose-500" />
-                  <span>{error}</span>
+                <div className="pt-3 w-full">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full h-12 rounded-xl bg-[#FF5500] hover:bg-[#E04B00] active:scale-[0.99] text-white text-xs font-black tracking-wider uppercase transition-all shadow-lg shadow-orange-500/25 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>{isSubmitting ? 'Creating Account...' : 'Create Super Admin & Enter'}</span>
+                    <ArrowRight className="w-4 h-4 text-white" />
+                  </button>
                 </div>
-              )}
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Username / Email</span>
-                </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter email or handle"
-                  required
-                  className="w-full h-10 px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 bg-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-transparent transition-all"
+              </form>
+            </div>
+          ) : (
+            /* REGULAR LOGIN FORM */
+            <div className="w-full space-y-6">
+              {/* Header: Logo & Title */}
+              <div className="flex flex-col items-center text-center">
+                <img
+                  src="/logobg.webp"
+                  alt="Chill & Choc Logo"
+                  className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-xl mb-3 select-none pointer-events-none"
                 />
+                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight drop-shadow-sm">
+                  Admin Portal
+                </h1>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Password or 4-Digit Security PIN</span>
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="w-full h-10 px-3.5 rounded-xl border border-zinc-200 text-xs font-medium text-zinc-900 bg-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#FF5500] focus:border-transparent transition-all"
-                />
-              </div>
+              {/* Form */}
+              <form onSubmit={handleLoginSubmit} className="space-y-6 w-full">
+                {error && (
+                  <div className="w-full p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                    <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{error}</span>
+                  </div>
+                )}
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full h-11 rounded-xl bg-[#27140B] hover:bg-[#180b05] text-white text-xs font-black tracking-wide transition-all duration-150 flex items-center justify-center gap-2 shadow-md cursor-pointer hover:shadow-lg active:scale-98"
-              >
-                <span>Authenticate &amp; Enter</span>
-                <ArrowRight className="w-4 h-4 text-[#FF5500]" />
-              </button>
-            </form>
-          </div>
-        )}
+                {/* Username / Email field with bottom border only */}
+                <div className="w-full border-b-2 border-white/30 focus-within:border-[#FF5500] transition-colors pb-1.5">
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Username / Email"
+                    required
+                    autoComplete="username"
+                    className="w-full bg-transparent text-white placeholder:text-zinc-400 text-sm font-medium outline-none border-none py-1.5"
+                  />
+                </div>
+
+                {/* Password / PIN field with bottom border only */}
+                <div className="w-full border-b-2 border-white/30 focus-within:border-[#FF5500] transition-colors pb-1.5">
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password or 4-Digit PIN"
+                    required
+                    autoComplete="current-password"
+                    className="w-full bg-transparent text-white placeholder:text-zinc-400 text-sm font-medium outline-none border-none py-1.5 tracking-wider"
+                  />
+                </div>
+
+                {/* Submit Button */}
+                <div className="pt-2 w-full">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || !username.trim() || !password.trim()}
+                    className={`w-full h-12 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer ${
+                      username.trim() && password.trim()
+                        ? 'bg-[#FF5500] hover:bg-[#E04B00] active:scale-[0.99] text-white hover:shadow-lg shadow-orange-500/25'
+                        : 'bg-zinc-800/80 text-zinc-500 cursor-not-allowed shadow-none'
+                    }`}
+                  >
+                    <span>{isSubmitting ? 'Authenticating...' : 'Authenticate & Enter'}</span>
+                    <ArrowRight className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
       </main>
 
       {/* App Footer */}
-      <AppFooter className="w-full max-w-5xl rounded-lg border border-zinc-200 mt-4 shadow-xs" />
+      <AppFooter className="w-full z-10" />
     </div>
   );
 };

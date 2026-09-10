@@ -111,20 +111,31 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [session, setSession] = useState<CashSession>(() => {
     try {
       const saved = localStorage.getItem('pos_cash_session');
-      if (saved) return JSON.parse(saved);
+      if (saved && saved !== 'null' && saved !== 'undefined') {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            ...DEFAULT_SESSION,
+            ...parsed,
+          };
+        }
+      }
     } catch (e) {
       console.warn('Failed to parse pos_cash_session from localStorage', e);
     }
     return DEFAULT_SESSION;
   });
 
-  const [hasActiveSession, setHasActiveSession] = useState<boolean>(() => !session.isClosed);
+  const [hasActiveSession, setHasActiveSession] = useState<boolean>(() => Boolean(session && !session.isClosed));
 
   // Load persisted movements
   const [cashMovements, setCashMovements] = useState<CashMovement[]>(() => {
     try {
       const saved = localStorage.getItem('pos_cash_movements');
-      if (saved) return JSON.parse(saved);
+      if (saved && saved !== 'null' && saved !== 'undefined') {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch (e) {
       console.warn('Failed to parse pos_cash_movements from localStorage', e);
     }
@@ -135,7 +146,10 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [sessionHistory, setSessionHistory] = useState<CashSession[]>(() => {
     try {
       const saved = localStorage.getItem('pos_cash_history');
-      if (saved) return JSON.parse(saved);
+      if (saved && saved !== 'null' && saved !== 'undefined') {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch (e) {
       console.warn('Failed to parse pos_cash_history from localStorage', e);
     }
@@ -154,19 +168,31 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Persist helper
   const persistState = (
-    newSession?: CashSession,
+    newSession?: CashSession | null,
     newMovements?: CashMovement[],
     newHistory?: CashSession[]
   ) => {
     try {
       if (newSession !== undefined) {
-        localStorage.setItem('pos_cash_session', JSON.stringify(newSession));
+        if (newSession && typeof newSession === 'object') {
+          localStorage.setItem('pos_cash_session', JSON.stringify(newSession));
+        } else {
+          localStorage.removeItem('pos_cash_session');
+        }
       }
       if (newMovements !== undefined) {
-        localStorage.setItem('pos_cash_movements', JSON.stringify(newMovements));
+        if (Array.isArray(newMovements)) {
+          localStorage.setItem('pos_cash_movements', JSON.stringify(newMovements));
+        } else {
+          localStorage.removeItem('pos_cash_movements');
+        }
       }
       if (newHistory !== undefined) {
-        localStorage.setItem('pos_cash_history', JSON.stringify(newHistory));
+        if (Array.isArray(newHistory)) {
+          localStorage.setItem('pos_cash_history', JSON.stringify(newHistory));
+        } else {
+          localStorage.removeItem('pos_cash_history');
+        }
       }
     } catch (err) {
       console.warn('Error saving cash state to localStorage', err);
@@ -178,14 +204,14 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const unsubConnection = cashSyncSocket.onConnectionChange(setIsWsConnected);
 
     const unsubMessages = cashSyncSocket.subscribe((msg: CashSyncMessage) => {
-      if (msg.type === 'DRAWER_OPENED') {
+      if (msg.type === 'DRAWER_OPENED' && msg.payload?.session) {
         const newSession = msg.payload.session;
-        const newMovements = msg.payload.movements || [];
+        const newMovements = Array.isArray(msg.payload.movements) ? msg.payload.movements : [];
         setSession(newSession);
         setCashMovements(newMovements);
         setHasActiveSession(!newSession.isClosed);
         persistState(newSession, newMovements);
-      } else if (msg.type === 'DRAWER_CLOSED') {
+      } else if (msg.type === 'DRAWER_CLOSED' && msg.payload?.session) {
         const closedSession = msg.payload.session;
         setSession(closedSession);
         setHasActiveSession(false);
@@ -194,37 +220,39 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
           persistState(closedSession, undefined, updated);
           return updated;
         });
-      } else if (msg.type === 'CASH_MOVEMENT') {
+      } else if (msg.type === 'CASH_MOVEMENT' && msg.payload) {
         const { movement, session: updatedSession } = msg.payload;
-        if (updatedSession) {
+        if (updatedSession && typeof updatedSession === 'object') {
           setSession(updatedSession);
         }
         if (movement) {
           setCashMovements((prev) => {
             if (prev.some((m) => m.id === movement.id)) return prev;
             const updated = [movement, ...prev];
-            persistState(updatedSession, updated);
+            persistState(updatedSession || undefined, updated);
             return updated;
           });
         }
-      } else if (msg.type === 'CASH_SALE' || msg.type === 'CASH_REFUND') {
+      } else if ((msg.type === 'CASH_SALE' || msg.type === 'CASH_REFUND') && msg.payload) {
         const updatedSession = msg.payload.session;
-        if (updatedSession) {
+        if (updatedSession && typeof updatedSession === 'object') {
           setSession(updatedSession);
           persistState(updatedSession);
         }
-      } else if (msg.type === 'SYNC_CASH_STATE') {
-        if (msg.payload.session) {
+      } else if (msg.type === 'SYNC_CASH_STATE' && msg.payload) {
+        if (msg.payload.session && typeof msg.payload.session === 'object') {
           setSession(msg.payload.session);
           setHasActiveSession(!msg.payload.session.isClosed);
+          persistState(msg.payload.session);
         }
         if (Array.isArray(msg.payload.movements)) {
           setCashMovements(msg.payload.movements);
+          persistState(undefined, msg.payload.movements);
         }
         if (Array.isArray(msg.payload.history)) {
           setSessionHistory(msg.payload.history);
+          persistState(undefined, undefined, msg.payload.history);
         }
-        persistState(msg.payload.session, msg.payload.movements, msg.payload.history);
       } else if (msg.type === 'REQUEST_SYNC') {
         // Send our current state if we have it
         if (sessionRef.current) {
@@ -242,20 +270,33 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Cross-tab storage event listener
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'pos_cash_session' && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          setSession(parsed);
-          setHasActiveSession(!parsed.isClosed);
-        } catch {}
-      } else if (e.key === 'pos_cash_movements' && e.newValue) {
-        try {
-          setCashMovements(JSON.parse(e.newValue));
-        } catch {}
-      } else if (e.key === 'pos_cash_history' && e.newValue) {
-        try {
-          setSessionHistory(JSON.parse(e.newValue));
-        } catch {}
+      if (e.key === 'pos_cash_session') {
+        if (e.newValue && e.newValue !== 'null' && e.newValue !== 'undefined') {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            if (parsed && typeof parsed === 'object') {
+              setSession(parsed);
+              setHasActiveSession(!parsed.isClosed);
+            }
+          } catch {}
+        } else {
+          setSession(DEFAULT_SESSION);
+          setHasActiveSession(false);
+        }
+      } else if (e.key === 'pos_cash_movements') {
+        if (e.newValue && e.newValue !== 'null' && e.newValue !== 'undefined') {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            if (Array.isArray(parsed)) setCashMovements(parsed);
+          } catch {}
+        }
+      } else if (e.key === 'pos_cash_history') {
+        if (e.newValue && e.newValue !== 'null' && e.newValue !== 'undefined') {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            if (Array.isArray(parsed)) setSessionHistory(parsed);
+          } catch {}
+        }
       }
     };
 
@@ -276,19 +317,27 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
       fetchCashMovementsFromSupabase(),
     ]).then(([sessions, movements]) => {
       if (!isMounted) return;
-      if (sessions && sessions.length > 0) {
-        const active = sessions.find((s) => !s.isClosed) || sessions[0];
-        if (active) {
+      if (Array.isArray(sessions)) {
+        if (sessions.length > 0) {
+          const active = sessions.find((s) => !s.isClosed) || sessions[0];
           setSession(active);
           setHasActiveSession(!active.isClosed);
           sessionRef.current = active;
+          persistState(active);
+        } else {
+          setSession(DEFAULT_SESSION);
+          setHasActiveSession(false);
+          sessionRef.current = DEFAULT_SESSION;
+          persistState(null);
         }
         setSessionHistory(sessions);
         historyRef.current = sessions;
+        persistState(undefined, undefined, sessions);
       }
-      if (movements && movements.length > 0) {
+      if (Array.isArray(movements)) {
         setCashMovements(movements);
         movementsRef.current = movements;
+        persistState(undefined, movements);
       }
     });
 
@@ -347,7 +396,7 @@ export const CashierProvider: React.FC<{ children: React.ReactNode }> = ({ child
             isClosed: Boolean(row.is_closed),
           };
           setSession((prev) => {
-            if (prev.id === sess.id || !prev.id) return sess;
+            if (!prev || prev.id === sess.id || !prev.id) return sess;
             return prev;
           });
           setHasActiveSession(!sess.isClosed);

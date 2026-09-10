@@ -19,26 +19,22 @@ import { POSLockScreen } from '@/components/pos/POSLockScreen';
 // One-time cleanup for any cached dummy records in the browser's localStorage
 if (typeof window !== 'undefined') {
   try {
-    const CLEAN_FLAG = 'chill_choc_clean_wipe_executed_v4';
+    const CLEAN_FLAG = 'chill_choc_wipe_stale_caches_supabase_only_v6';
     if (localStorage.getItem(CLEAN_FLAG) !== 'true') {
       const keysToPurge = [
         'pos_completed_sales',
         'chill_choc_products_v1',
         'chill_choc_staff_members',
-        'chill_choc_suppliers',
         'chill_choc_purchase_orders_v1',
         'chill_choc_supplier_returns',
         'pos_return_requests',
         'chill_choc_return_requests',
-        'chill_choc_operators',
         'pos_cash_session',
         'pos_cash_movements',
         'pos_cash_history',
         'pos_is_locked',
         'pos_blocked_by_admin',
         'pos_blocked_reason',
-        'chill_admin_logged_in',
-        'chill_admin_user',
         'pos_held_bills',
       ];
       keysToPurge.forEach((k) => localStorage.removeItem(k));
@@ -67,6 +63,19 @@ if (typeof window !== 'undefined') {
           }
         }
       } catch {}
+    }
+    // Proactively clean up corrupted null values for cash session and movements
+    const rawCashSession = localStorage.getItem('pos_cash_session');
+    if (rawCashSession === 'null' || rawCashSession === 'undefined') {
+      localStorage.removeItem('pos_cash_session');
+    }
+    const rawCashMovements = localStorage.getItem('pos_cash_movements');
+    if (rawCashMovements === 'null' || rawCashMovements === 'undefined') {
+      localStorage.removeItem('pos_cash_movements');
+    }
+    const rawCashHistory = localStorage.getItem('pos_cash_history');
+    if (rawCashHistory === 'null' || rawCashHistory === 'undefined') {
+      localStorage.removeItem('pos_cash_history');
     }
   } catch (err) {
     console.warn('Local storage purge warning:', err);

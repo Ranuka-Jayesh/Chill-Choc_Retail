@@ -10,6 +10,8 @@ import { BatchListModal } from '@/components/admin/BatchListModal';
 import { ProductDetailsModal } from '@/components/admin/ProductDetailsModal';
 import { Modal } from '@/components/common/Modal';
 import { MonthYearPicker } from '@/components/common/MonthYearPicker';
+import { fetchCategoriesFromSupabase, ensureCategoryExistsInSupabase, deleteCategoryFromSupabase } from '@/services/supabaseData';
+import { supabase } from '@/services/supabase';
 import {
   Package,
   Search,
@@ -117,8 +119,34 @@ export const CategoryIconComponent: React.FC<{ name?: string; className?: string
   return <IconComp className={className} />;
 };
 
-const DEFAULT_CATEGORY_ITEMS: CategoryItem[] = [
+export const highlightMatch = (text: string, query: string) => {
+  if (!query || !query.trim()) return text;
+  const cleanQ = query.trim();
+  const index = text.toLowerCase().indexOf(cleanQ.toLowerCase());
+  if (index === -1) return text;
+  const before = text.slice(0, index);
+  const match = text.slice(index, index + cleanQ.length);
+  const after = text.slice(index + cleanQ.length);
+  return (
+    <>
+      {before}
+      <span className="text-[#FF5500] font-black bg-orange-100/80 px-0.5 rounded">
+        {match}
+      </span>
+      {after}
+    </>
+  );
+};
+
+export const DEFAULT_CATEGORY_ITEMS: CategoryItem[] = [
   { id: 'all', name: 'All', icon: 'Layers' },
+  { id: 'chocolate', name: 'Chocolates & Truffles', icon: 'Candy' },
+  { id: 'toffees', name: 'Toffees & Candies', icon: 'Cookie' },
+  { id: 'biscuits', name: 'Biscuits & Wafers', icon: 'Cake' },
+  { id: 'drinks', name: 'Beverages & Shakes', icon: 'CupSoda' },
+  { id: 'gifts', name: 'Gifting & Hampers', icon: 'Gift' },
+  { id: 'ice_cream', name: 'Ice Creams', icon: 'IceCream' },
+  { id: 'others', name: 'Other Confections', icon: 'Package' },
 ];
 
 const getStoredCategories = (): CategoryItem[] => {
@@ -131,9 +159,9 @@ const getStoredCategories = (): CategoryItem[] => {
       }
     }
   } catch (e) {
-    // fallback to defaults
+    // fallback
   }
-  return DEFAULT_CATEGORY_ITEMS;
+  return [{ id: 'all', name: 'All', icon: 'Layers' }];
 };
 
 interface ExpiryItem {
@@ -288,10 +316,11 @@ export const AdminProducts: React.FC = () => {
     setSpecialFilter('none');
   };
 
-  const handleConfirmDeleteCategory = () => {
+  const handleConfirmDeleteCategory = async () => {
     if (!categoryToDelete) return;
     const catName = categoryToDelete.name;
-    const updated = categories.filter((c) => c.id !== categoryToDelete.id);
+    const catId = categoryToDelete.id;
+    const updated = categories.filter((c) => c.id !== catId);
     setCategories(updated);
     try {
       localStorage.setItem('chill_choc_category_items_v2', JSON.stringify(updated));
@@ -299,9 +328,11 @@ export const AdminProducts: React.FC = () => {
       // ignore
     }
 
-    if (selectedCategory === categoryToDelete.id) {
+    if (selectedCategory === catId) {
       setSelectedCategory('all');
     }
+
+    await deleteCategoryFromSupabase(catId);
 
     showToast(`Category "${catName}" deleted`, 'success');
     setCategoryToDelete(null);
@@ -342,6 +373,84 @@ export const AdminProducts: React.FC = () => {
   const [newIsAvailable, setNewIsAvailable] = useState(true);
   const [newPhotoData, setNewPhotoData] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Name Autocomplete Suggestions from Database
+  const [showNameSuggestions, setShowNameSuggestions] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
+  const nameSuggestionsRef = useRef<HTMLDivElement>(null);
+
+  const nameSuggestions = useMemo(() => {
+    const q = newName.trim().toLowerCase();
+    if (!q || q.length < 1) return [];
+
+    // Match products from database by name, brand, or SKU
+    const matched = products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.brand && p.brand.toLowerCase().includes(q)) ||
+        (p.sku && p.sku.toLowerCase().includes(q))
+    );
+
+    // Sort: exact or prefix matches first, then alphabetical
+    matched.sort((a, b) => {
+      const aStarts = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+      return a.name.localeCompare(b.name);
+    });
+
+    return matched.slice(0, 6);
+  }, [newName, products]);
+
+  const handleSelectNameSuggestion = (prod: Product) => {
+    setNewName(prod.name);
+    if (prod.category) setNewCategory(prod.category as ConfectionCategory);
+    if (prod.weight) setNewWeight(prod.weight);
+    if (prod.brand) setNewBrand(prod.brand);
+    if (prod.lowStockThreshold) setNewLowStock(String(prod.lowStockThreshold));
+    if (prod.imageUrl) setNewPhotoData(prod.imageUrl);
+    if (prod.isAvailable !== undefined) setNewIsAvailable(prod.isAvailable);
+    setShowNameSuggestions(false);
+    setActiveSuggestionIndex(-1);
+    showToast(`Autofilled details from "${prod.name}"`, 'info');
+  };
+
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showNameSuggestions || nameSuggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveSuggestionIndex((prev) =>
+        prev < nameSuggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveSuggestionIndex((prev) =>
+        prev > 0 ? prev - 1 : nameSuggestions.length - 1
+      );
+    } else if (e.key === 'Enter') {
+      if (activeSuggestionIndex >= 0 && activeSuggestionIndex < nameSuggestions.length) {
+        e.preventDefault();
+        handleSelectNameSuggestion(nameSuggestions[activeSuggestionIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setShowNameSuggestions(false);
+    }
+  };
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        nameSuggestionsRef.current &&
+        !nameSuggestionsRef.current.contains(e.target as Node)
+      ) {
+        setShowNameSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Edit Product Modal state
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
@@ -456,6 +565,52 @@ export const AdminProducts: React.FC = () => {
     }
   };
 
+  // Fetch and sync categories from Supabase on mount and listen to realtime changes
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncCategories = async () => {
+      const supaCats = await fetchCategoriesFromSupabase();
+      if (!isMounted) return;
+
+      const list: CategoryItem[] = [{ id: 'all', name: 'All', icon: 'Layers' }];
+      if (Array.isArray(supaCats) && supaCats.length > 0) {
+        supaCats.forEach((sc) => {
+          if (sc.slug !== 'all' && !list.some((item) => item.id.toLowerCase() === sc.slug.toLowerCase())) {
+            list.push({
+              id: sc.slug,
+              name: sc.name,
+              icon: sc.icon_name || 'Tag',
+            });
+          }
+        });
+      }
+
+      setCategories(list);
+      try {
+        localStorage.setItem('chill_choc_category_items_v2', JSON.stringify(list));
+      } catch {}
+    };
+
+    syncCategories();
+
+    const channel = supabase
+      .channel('realtime_admin_categories')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'confection_categories' },
+        () => {
+          syncCategories();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   // Add Category Handler with Selected Icon
   const handleCreateCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -486,6 +641,9 @@ export const AdminProducts: React.FC = () => {
     } catch (err) {
       // ignore
     }
+
+    // Persist to Supabase
+    ensureCategoryExistsInSupabase(slug, trimmed, selectedIcon);
 
     setSelectedCategory(slug);
     setNewCategory(slug as ConfectionCategory);
@@ -541,6 +699,8 @@ export const AdminProducts: React.FC = () => {
     setNewLowStock('5');
     setNewIsAvailable(true);
     setNewPhotoData('');
+    setShowNameSuggestions(false);
+    setActiveSuggestionIndex(-1);
   };
 
   return (
@@ -1134,9 +1294,13 @@ export const AdminProducts: React.FC = () => {
       {/* Add New Product Modal (2-Column Split: Photo on left, Details on right) */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setShowNameSuggestions(false);
+        }}
         title="Add Product"
         maxWidth="2xl"
+        bodyClassName="p-3.5 overflow-visible"
       >
         <form onSubmit={handleCreateProduct} className="p-1">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1196,17 +1360,76 @@ export const AdminProducts: React.FC = () => {
             {/* Side 2: Product Details */}
             <div className="flex flex-col justify-between space-y-3">
               <div className="space-y-3">
-                {/* Product Name */}
-                <div className="space-y-1">
+                {/* Product Name with Database Autocomplete Dropdown */}
+                <div className="space-y-1 relative" ref={nameSuggestionsRef}>
                   <label className="font-bold text-zinc-700 text-xs">Name *</label>
-                  <input
-                    type="text"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="Product name"
-                    required
-                    className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-zinc-900 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#FF5500]"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => {
+                        setNewName(e.target.value);
+                        setShowNameSuggestions(true);
+                        setActiveSuggestionIndex(-1);
+                      }}
+                      onFocus={() => {
+                        if (newName.trim().length >= 1) setShowNameSuggestions(true);
+                      }}
+                      onKeyDown={handleNameKeyDown}
+                      placeholder="Product name"
+                      required
+                      className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-zinc-900 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#FF5500]"
+                    />
+                    {newName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewName('');
+                          setShowNameSuggestions(false);
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 p-0.5 rounded-full hover:bg-zinc-100 cursor-pointer"
+                        title="Clear name"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Single Row Clean Suggestion Dropdown */}
+                  {showNameSuggestions && nameSuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white rounded-xl shadow-xl border border-zinc-200 overflow-hidden divide-y divide-zinc-100 animate-in fade-in slide-in-from-top-1 duration-150 max-h-48 overflow-y-auto">
+                      {nameSuggestions.map((prod, idx) => {
+                        const isSelected = idx === activeSuggestionIndex;
+                        return (
+                          <button
+                            key={prod.id}
+                            type="button"
+                            onClick={() => handleSelectNameSuggestion(prod)}
+                            className={`w-full px-3 py-1.5 text-left flex items-center justify-between gap-2 transition-colors cursor-pointer text-[11px] ${
+                              isSelected ? 'bg-orange-50 text-zinc-900' : 'hover:bg-zinc-50 text-zinc-800'
+                            }`}
+                          >
+                            <span className="font-medium text-zinc-900 truncate">
+                              {highlightMatch(prod.name, newName)}
+                            </span>
+                            <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 flex-shrink-0">
+                              {prod.category && (
+                                <span className="capitalize px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-600 font-medium">
+                                  {prod.category}
+                                </span>
+                              )}
+                              {prod.weight && <span>{prod.weight}</span>}
+                              {prod.price > 0 && (
+                                <span className="text-[#FF5500] font-semibold">
+                                  Rs. {prod.price.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Category & Weight / Size */}

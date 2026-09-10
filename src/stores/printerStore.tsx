@@ -7,11 +7,12 @@ import {
   AgentStatus,
 } from '@/services/POSPrintAgent';
 
-// Instantiate the singleton printer instance with autoReconnect enabled
+// Instantiate the singleton printer instance with autoReconnect disabled to prevent console polling spam when offline
 export const printer = new POSPrintAgent({
   url: 'ws://127.0.0.1:17891',
-  autoReconnect: true,
-  reconnectInterval: 3000,
+  autoReconnect: false,
+  reconnectInterval: 5000,
+  maxReconnectAttempts: 0,
 });
 
 export interface PrinterContextType {
@@ -60,9 +61,9 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     });
 
-    // Automatically connect when POS application loads
-    printer.connect().catch((err) => {
-      console.debug('POS Print Agent initial connection pending:', err.message);
+    // Automatically attempt connection on app startup (no manual click needed)
+    printer.connect().catch(() => {
+      // Seamlessly falls back to browser printing if no desktop agent is running on port 17891
     });
 
     return () => {
@@ -76,9 +77,13 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       await printer.connect();
       setIsConnected(printer.isConnected());
+      if (printer.isConnected()) {
+        localStorage.setItem('pos_hardware_printer_enabled', 'true');
+      }
     } catch (err) {
-      console.warn('Manual reconnect to POS Print Agent failed:', err);
+      console.warn('Manual reconnect to POS Print Agent failed (no desktop service on port 17891):', err);
       setIsConnected(false);
+      localStorage.removeItem('pos_hardware_printer_enabled');
       throw err;
     }
   }, []);

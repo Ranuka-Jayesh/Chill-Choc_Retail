@@ -58,8 +58,11 @@ export const PurchaseOrderProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     let isMounted = true;
     fetchPurchaseOrdersFromSupabase().then((data) => {
-      if (isMounted && Array.isArray(data) && data.length > 0) {
+      if (isMounted && Array.isArray(data)) {
         setPurchaseOrders(data);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        } catch {}
       }
     });
     return () => {

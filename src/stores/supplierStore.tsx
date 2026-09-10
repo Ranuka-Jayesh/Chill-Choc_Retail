@@ -45,7 +45,7 @@ export const SupplierProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     let isMounted = true;
     fetchSuppliersFromSupabase().then((data) => {
-      if (isMounted && Array.isArray(data) && data.length > 0) {
+      if (isMounted && Array.isArray(data)) {
         setSuppliers(data);
         persistSuppliers(data);
       }

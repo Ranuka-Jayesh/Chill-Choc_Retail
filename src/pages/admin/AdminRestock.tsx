@@ -5,7 +5,7 @@ import { useProducts } from '@/stores/productStore';
 import { useSuppliers } from '@/stores/supplierStore';
 import { usePurchaseOrders } from '@/stores/purchaseOrderStore';
 import { useToast } from '@/stores/toastStore';
-import { PurchaseOrder, PurchaseOrderItem, POPaymentBreakdown, Supplier } from '@/types';
+import { PurchaseOrder, PurchaseOrderItem, POPaymentBreakdown, Supplier, Product } from '@/types';
 import { MonthYearPicker } from '@/components/common/MonthYearPicker';
 import {
   RefreshCw,
@@ -25,14 +25,383 @@ import {
   Eye,
   Percent,
   Clock,
+  PauseCircle,
   Check,
   AlertCircle,
   User,
+  ChevronDown,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { StockBatchLabelPrintModal, RestockedItemForPrint } from '@/components/admin/StockBatchLabelPrintModal';
 import { PurchaseOrderDetailsModal } from '@/components/admin/PurchaseOrderDetailsModal';
 import { getPaymentScheduleInfo } from '@/utils/paymentSchedule';
+import { formatDateYYYYMMDD, getDaysInMonth } from '@/utils/dateValidator';
+
+export interface DraftLineItem {
+  id: string;
+  productId: string;
+  batchNumber: string;
+  expiryDate: string;
+  costPrice: number | '';
+  profitMargin: number | '';
+  sellingPrice: number | '';
+  quantity: number | '';
+}
+
+export interface HeldPurchaseOrder {
+  id: string;
+  heldAt: string;
+  invoiceRef: string;
+  supplierId: string;
+  supplierName: string;
+  deliveryNotes: string;
+  isUnpaidCredit: boolean;
+  cashAmount: string;
+  cardAmount: string;
+  chequeAmount: string;
+  chequeDueDate: string;
+  chequeNumber: string;
+  unpaidDueDate: string;
+  lineItems: DraftLineItem[];
+  totalInvoiced: number;
+}
+
+const STORAGE_KEY_HELD_POS = 'chill_choc_held_pos';
+
+const loadHeldPOsFromStorage = (): HeldPurchaseOrder[] => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_HELD_POS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('Failed to load held POs from localStorage:', e);
+    return [];
+  }
+};
+
+const saveHeldPOsToStorage = (items: HeldPurchaseOrder[]) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_HELD_POS, JSON.stringify(items));
+  } catch (e) {
+    console.error('Failed to save held POs to localStorage:', e);
+  }
+};
+
+export const highlightMatch = (text: string, query: string) => {
+  if (!query || !query.trim()) return text;
+  const cleanQ = query.trim();
+  const index = text.toLowerCase().indexOf(cleanQ.toLowerCase());
+  if (index === -1) return text;
+  const before = text.slice(0, index);
+  const match = text.slice(index, index + cleanQ.length);
+  const after = text.slice(index + cleanQ.length);
+  return (
+    <>
+      {before}
+      <span className="text-[#FF5500] font-black bg-orange-100/90 px-0.5 rounded">
+        {match}
+      </span>
+      {after}
+    </>
+  );
+};
+
+interface LineItemProductAutocompleteProps {
+  idx: number;
+  item: DraftLineItem;
+  products: Product[];
+  supplierFilteredProducts: Product[];
+  studioSupplierId: string;
+  supplierName?: string;
+  onSelectProduct: (productId: string) => void;
+  onNavigateNext: () => void;
+  onNavigatePrev: () => void;
+}
+
+export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompleteProps> = ({
+  idx,
+  item,
+  products,
+  supplierFilteredProducts,
+  studioSupplierId,
+  supplierName,
+  onSelectProduct,
+  onNavigateNext,
+  onNavigatePrev,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const currentProduct = useMemo(
+    () => products.find((p) => p.id === item.productId),
+    [products, item.productId]
+  );
+
+  // Filter suggestions strictly for selected supplier products only
+  const suggestions = useMemo(() => {
+    const q = (isTyping ? searchQuery : '').trim().toLowerCase();
+    if (!q || q.length < 1) return [];
+
+    // Strictly products for the selected supplier
+    const supplierProducts = studioSupplierId ? supplierFilteredProducts : products;
+
+    const matched = supplierProducts.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+        (p.brand && p.brand.toLowerCase().includes(q)) ||
+        (p.weight && p.weight.toLowerCase().includes(q))
+    );
+
+    matched.sort((a, b) => {
+      const aStarts = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+      return a.name.localeCompare(b.name);
+    });
+
+    return matched.slice(0, 10);
+  }, [isTyping, searchQuery, studioSupplierId, supplierFilteredProducts, products]);
+
+  // Click outside to close
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setIsOpen(false);
+        setIsTyping(false);
+        setSearchQuery('');
+        setActiveIndex(-1);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  // Scroll active item into view
+  useEffect(() => {
+    if (activeIndex >= 0 && dropdownRef.current) {
+      const activeEl = dropdownRef.current.querySelector(
+        `[data-suggestion-index="${activeIndex}"]`
+      ) as HTMLElement | null;
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [activeIndex]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    setIsTyping(true);
+    setActiveIndex(-1);
+    if (val.trim().length >= 1) {
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
+    if (val.trim() === '' && item.productId) {
+      onSelectProduct('');
+    }
+  };
+
+  const handleInputFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    // Strictly do not open dropdown upon focus until user types letters
+    setIsOpen(false);
+    setIsTyping(false);
+    setActiveIndex(-1);
+    e.target.select();
+  };
+
+  const handleChoose = (prod: Product) => {
+    onSelectProduct(prod.id);
+    setIsOpen(false);
+    setIsTyping(false);
+    setSearchQuery('');
+    setActiveIndex(-1);
+    onNavigateNext();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      if (!isOpen || suggestions.length === 0) return;
+      e.preventDefault();
+      setActiveIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      if (!isOpen || suggestions.length === 0) return;
+      e.preventDefault();
+      setActiveIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1));
+    } else if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        e.preventDefault();
+        setIsOpen(false);
+        setIsTyping(false);
+        onNavigatePrev();
+        return;
+      }
+      if (isOpen && activeIndex >= 0 && activeIndex < suggestions.length) {
+        e.preventDefault();
+        handleChoose(suggestions[activeIndex]);
+      } else if (isOpen && suggestions.length === 1 && searchQuery.trim().length > 0) {
+        e.preventDefault();
+        handleChoose(suggestions[0]);
+      } else if (item.productId) {
+        e.preventDefault();
+        setIsOpen(false);
+        setIsTyping(false);
+        onNavigateNext();
+      } else if (isOpen && suggestions.length > 0) {
+        e.preventDefault();
+        handleChoose(suggestions[0]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
+      setIsTyping(false);
+      setSearchQuery('');
+    } else if (e.key === 'Tab') {
+      if (isOpen && activeIndex >= 0 && activeIndex < suggestions.length) {
+        onSelectProduct(suggestions[activeIndex].id);
+      }
+      setIsOpen(false);
+      setIsTyping(false);
+    }
+  };
+
+  const displayValue = isTyping
+    ? searchQuery
+    : currentProduct
+    ? `${currentProduct.name}${currentProduct.weight ? ` (${currentProduct.weight})` : ''}`
+    : searchQuery;
+
+  return (
+    <div
+      className={`relative w-full ${isOpen ? 'z-40' : 'z-1'}`}
+      ref={containerRef}
+    >
+      <div className="relative flex items-center w-full">
+        <input
+          ref={inputRef}
+          id={`line-item-${idx}-product`}
+          type="text"
+          autoComplete="off"
+          value={displayValue}
+          onChange={handleInputChange}
+          onFocus={handleInputFocus}
+          onKeyDown={handleKeyDown}
+          placeholder={
+            studioSupplierId
+              ? 'Type to search product...'
+              : '-- Select Supplier First --'
+          }
+          className={`w-full bg-transparent border-0 border-b-2 font-semibold text-stone-800 text-[11px] py-0.5 pr-5 transition-colors focus:outline-none placeholder:text-stone-400 placeholder:font-normal truncate ${
+            isOpen
+              ? 'border-[#00b4b6] bg-stone-50/70'
+              : 'border-transparent hover:border-stone-200'
+          }`}
+        />
+
+        {item.productId && (
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center pr-0.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectProduct('');
+                setSearchQuery('');
+                setIsTyping(false);
+                setIsOpen(false);
+                inputRef.current?.focus();
+              }}
+              className="text-stone-400 hover:text-stone-700 p-0.5 rounded-full hover:bg-stone-100 transition-colors cursor-pointer"
+              title="Clear product"
+              tabIndex={-1}
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Autocomplete Dropdown - strictly visible only while typing, header removed */}
+      {isOpen && isTyping && searchQuery.trim().length >= 1 && (
+        <div
+          ref={dropdownRef}
+          className="absolute top-full left-0 mt-1 z-50 w-[360px] sm:w-[440px] max-w-[90vw] bg-white rounded-xl shadow-2xl border border-stone-200 overflow-hidden divide-y divide-stone-100 animate-in fade-in slide-in-from-top-1 duration-150 max-h-56 overflow-y-auto"
+        >
+          {suggestions.length === 0 ? (
+            <div className="p-3 text-center text-stone-400 text-[11px]">
+              No products found matching &ldquo;{searchQuery}&rdquo;
+            </div>
+          ) : (
+            suggestions.map((p, sIdx) => {
+              const isSelected = sIdx === activeIndex;
+              const isCurrentlyChosen = p.id === item.productId;
+              return (
+                <button
+                  key={p.id}
+                  data-suggestion-index={sIdx}
+                  type="button"
+                  onClick={() => handleChoose(p)}
+                  onMouseEnter={() => setActiveIndex(sIdx)}
+                  className={`w-full px-2.5 py-1.5 text-left flex items-center justify-between gap-2 transition-colors cursor-pointer text-[11px] ${
+                    isSelected
+                      ? 'bg-orange-50 text-stone-900 border-l-2 border-[#FF5500]'
+                      : isCurrentlyChosen
+                      ? 'bg-stone-50/80 text-stone-900 font-semibold'
+                      : 'hover:bg-stone-50 text-stone-800'
+                  }`}
+                >
+                  {/* Left: Product Name with Letter-by-Letter Highlighting + Weight */}
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <Package className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                    <span className="font-semibold text-stone-900 truncate">
+                      {highlightMatch(p.name, searchQuery)}
+                    </span>
+                    {p.weight && (
+                      <span className="font-mono text-[10px] px-1 py-0.2 rounded bg-stone-100 text-stone-600 shrink-0">
+                        {p.weight}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Right: Category + Cost / Selling Price */}
+                  <div className="flex items-center gap-2 text-[10.5px] text-stone-400 shrink-0">
+                    {p.category && (
+                      <span className="capitalize text-[10px] text-stone-500 hidden sm:inline">
+                        {p.category}
+                      </span>
+                    )}
+                    {p.costPrice && p.costPrice > 0 ? (
+                      <span className="text-stone-600 font-mono text-[10px]">
+                        Cost: Rs. {p.costPrice}
+                      </span>
+                    ) : null}
+                    {p.price > 0 && (
+                      <span className="text-[#FF5500] font-bold font-mono">
+                        Rs. {p.price.toLocaleString('en-US')}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const parsePODate = (dateStr?: string): { year: number; month: number } | null => {
   if (!dateStr || !dateStr.trim() || dateStr.trim().toUpperCase() === 'N/A') return null;
@@ -90,6 +459,11 @@ export const AdminRestock: React.FC = () => {
   const [viewingPO, setViewingPO] = useState<PurchaseOrder | null>(null);
   const [isNewSupplierModalOpen, setIsNewSupplierModalOpen] = useState(false);
 
+  // Held restock bills state
+  const [heldPOs, setHeldPOs] = useState<HeldPurchaseOrder[]>(loadHeldPOsFromStorage);
+  const [currentHeldId, setCurrentHeldId] = useState<string | null>(null);
+  const [isHeldPickerModalOpen, setIsHeldPickerModalOpen] = useState(false);
+
   // New Supplier Quick Form State
   const [newSupName, setNewSupName] = useState('');
   const [newSupBrand, setNewSupBrand] = useState('');
@@ -116,17 +490,6 @@ export const AdminRestock: React.FC = () => {
   const [unpaidDueDate, setUnpaidDueDate] = useState<string>('');
 
   // Line items state
-  interface DraftLineItem {
-    id: string;
-    productId: string;
-    batchNumber: string;
-    expiryDate: string;
-    costPrice: number | '';
-    profitMargin: number | '';
-    sellingPrice: number | '';
-    quantity: number | '';
-  }
-
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([]);
 
   // Helper to create a new draft line item with clean empty values
@@ -143,7 +506,8 @@ export const AdminRestock: React.FC = () => {
 
   // Open Studio with fresh/clean state (no auto-selected supplier and no initial item records)
   const handleOpenStudio = () => {
-    setInvoiceRef('');
+    setCurrentHeldId(null);
+    setInvoiceRef(`INV-${Math.floor(1000 + Math.random() * 9000)}`);
     setDeliveryNotes('');
     setIsUnpaidCredit(false);
     setCashAmount('0');
@@ -280,23 +644,6 @@ export const AdminRestock: React.FC = () => {
     }
   };
 
-  // Helper to format date inputs as YYYY / MM / DD with automatic masking
-  const formatDateYYYYMMDD = (rawVal: string, prevVal: string) => {
-    let digits = rawVal.replace(/\D/g, '');
-    if (rawVal.length < prevVal.length && prevVal.replace(/\D/g, '').length === digits.length) {
-      digits = digits.slice(0, -1);
-    }
-    digits = digits.slice(0, 8);
-
-    let formatted = digits;
-    if (digits.length > 4 && digits.length <= 6) {
-      formatted = `${digits.slice(0, 4)} / ${digits.slice(4)}`;
-    } else if (digits.length > 6) {
-      formatted = `${digits.slice(0, 4)} / ${digits.slice(4, 6)} / ${digits.slice(6)}`;
-    }
-    return formatted;
-  };
-
   // Expiry date input handler (YYYY / MM / DD auto-formatting & auto-jump to Cost)
   const handleExpiryInputChange = (id: string, idx: number, rawVal: string) => {
     const currentItem = lineItems.find((li) => li.id === id);
@@ -304,8 +651,8 @@ export const AdminRestock: React.FC = () => {
     const formatted = formatDateYYYYMMDD(rawVal, prevVal);
     handleUpdateLineItem(id, { expiryDate: formatted });
 
-    // Auto-jump to Cost field once all 8 digits (YYYY MM DD) are entered!
-    if (rawVal.replace(/\D/g, '').length === 8) {
+    // Auto-jump to Cost field once all 8 digits (YYYY MM DD) are validly entered!
+    if (formatted.replace(/\D/g, '').length === 8) {
       focusField(idx, 'cost');
     }
   };
@@ -592,10 +939,102 @@ export const AdminRestock: React.FC = () => {
       'success'
     );
 
+    // If this purchase order was resumed from a held draft, clean it up from held bills
+    setHeldPOs((prev) => {
+      const updated = prev.filter(
+        (p) => p.id !== currentHeldId && p.invoiceRef !== invoiceRef.trim()
+      );
+      saveHeldPOsToStorage(updated);
+      return updated;
+    });
+    setCurrentHeldId(null);
+
     setLineItems([]);
     setStudioSupplierId('');
     setIsStudioOpen(false);
     setIsBarcodeModalOpen(true);
+  };
+
+  // Hold Bill (saves draft state locally, strictly does NOT update stock or save PO)
+  const handleHoldBill = () => {
+    const hasItems = lineItems.some((i) => i.productId);
+    if (!studioSupplierId && !hasItems) {
+      showToast('Please select a supplier or add items before holding', 'error');
+      return;
+    }
+
+    const selectedSupplier = suppliers.find((s) => s.id === studioSupplierId);
+    const finalInvRef = invoiceRef.trim() || `INV-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const heldRecord: HeldPurchaseOrder = {
+      id: currentHeldId || `held-po-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      heldAt: new Date().toISOString(),
+      invoiceRef: finalInvRef,
+      supplierId: studioSupplierId,
+      supplierName: selectedSupplier ? selectedSupplier.name : 'Unassigned Supplier',
+      deliveryNotes,
+      isUnpaidCredit,
+      cashAmount,
+      cardAmount,
+      chequeAmount,
+      chequeDueDate,
+      chequeNumber,
+      unpaidDueDate,
+      lineItems,
+      totalInvoiced,
+    };
+
+    setHeldPOs((prev) => {
+      const exists = prev.some((p) => p.id === heldRecord.id);
+      let updated: HeldPurchaseOrder[];
+      if (exists) {
+        updated = prev.map((p) => (p.id === heldRecord.id ? heldRecord : p));
+      } else {
+        updated = [heldRecord, ...prev];
+      }
+      saveHeldPOsToStorage(updated);
+      return updated;
+    });
+
+    setIsStudioOpen(false);
+    setCurrentHeldId(null);
+    showToast(`Bill ${finalInvRef} held! Stock was NOT updated.`, 'info');
+  };
+
+  // Resume a held bill into Goods Inward Studio
+  const handleResumeHeldPO = (po: HeldPurchaseOrder) => {
+    setCurrentHeldId(po.id);
+    setStudioSupplierId(po.supplierId || '');
+    setInvoiceRef(po.invoiceRef || '');
+    setDeliveryNotes(po.deliveryNotes || '');
+    setIsUnpaidCredit(!!po.isUnpaidCredit);
+    setCashAmount(po.cashAmount || '0');
+    setCardAmount(po.cardAmount || '0');
+    setChequeAmount(po.chequeAmount || '0');
+    setChequeDueDate(po.chequeDueDate || '');
+    setChequeNumber(po.chequeNumber || '');
+    setUnpaidDueDate(po.unpaidDueDate || '');
+    setLineItems(po.lineItems || []);
+    setIsHeldPickerModalOpen(false);
+    setIsStudioOpen(true);
+    showToast(`Resumed held bill ${po.invoiceRef} (${po.supplierName})`, 'info');
+  };
+
+  // Discard a held bill draft
+  const handleDeleteHeldPO = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setHeldPOs((prev) => {
+      const updated = prev.filter((p) => p.id !== id);
+      saveHeldPOsToStorage(updated);
+      if (updated.length === 0) {
+        setIsHeldPickerModalOpen(false);
+      }
+      return updated;
+    });
+    if (currentHeldId === id) {
+      setCurrentHeldId(null);
+    }
+    showToast('Held bill draft discarded', 'info');
   };
 
   // Create Supplier quick handler
@@ -1188,6 +1627,39 @@ export const AdminRestock: React.FC = () => {
         </div>
       </div>
 
+      {/* Floating Bottom Right Held Bills Circle Button (Matches sample design, strictly no animation) */}
+      {heldPOs.length > 0 && (
+        <div className="fixed bottom-7 sm:bottom-8 right-6 sm:right-8 z-30 flex items-center">
+          <button
+            type="button"
+            onClick={() => {
+              setIsHeldPickerModalOpen(true);
+            }}
+            className="group relative w-11 h-11 sm:w-12 sm:h-12 aspect-square rounded-full bg-[#2B2B2B] text-white border-2 border-[#FF9100] shadow-lg shadow-black/25 hover:border-[#FFA500] hover:scale-105 active:scale-95 transition-transform duration-150 cursor-pointer flex items-center justify-center ring-4 ring-black/10"
+            title={
+              heldPOs.length === 1
+                ? `1 Held Restock Bill (${heldPOs[0].supplierName}) - Click to view`
+                : `${heldPOs.length} Held Restock Bills - Click to view`
+            }
+          >
+            {/* Center Pause Icon with golden orange stroke matching sample */}
+            <PauseCircle className="w-6 h-6 text-[#FFA800] stroke-[2.2] block shrink-0" />
+
+            {/* Badge Counter with white translucent halo - strictly NO animation */}
+            <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 bg-gradient-to-b from-[#FF7A18] to-[#E84800] text-white text-[10.5px] font-black rounded-full flex items-center justify-center shadow-md border-2 border-white/85 ring-2 ring-[#FF7A18]/40">
+              {heldPOs.length}
+            </span>
+
+            {/* Floating tooltip preview on hover */}
+            <div className="absolute right-full mr-3 px-2.5 py-1 rounded-lg bg-stone-900/95 text-stone-200 text-[11px] font-bold border border-stone-700 shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150">
+              {heldPOs.length === 1
+                ? `Held: ${heldPOs[0].invoiceRef} (Click to view)`
+                : `${heldPOs.length} Held Bills (Click to view)`}
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* 3-PANEL GOODS INWARD STUDIO MODAL (RECEIVE STOCK / PURCHASE ORDER)       */}
       {/* ========================================================================= */}
@@ -1203,15 +1675,33 @@ export const AdminRestock: React.FC = () => {
                 <span className="hidden sm:inline-flex bg-[#2a2928] text-stone-300 font-mono text-[10px] px-2.5 py-0.5 rounded-full border border-stone-600/70 font-bold tracking-wide shrink-0">
                   Goods Inward Studio
                 </span>
+                {currentHeldId && (
+                  <span className="hidden md:inline-flex items-center gap-1 bg-amber-500/20 text-amber-300 font-mono text-[10px] px-2.5 py-0.5 rounded-full border border-amber-500/40 font-bold tracking-wide shrink-0">
+                    <PauseCircle className="w-3 h-3 text-amber-400" />
+                    Held Draft
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setIsStudioOpen(false)}
+                  onClick={() => {
+                    setIsStudioOpen(false);
+                    setCurrentHeldId(null);
+                  }}
                   className="px-4 py-1 rounded-full bg-[#2a2928] hover:bg-stone-700 text-stone-200 text-[11px] font-bold border border-stone-600/80 transition-colors cursor-pointer"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleHoldBill}
+                  className="px-4 py-1 rounded-full bg-amber-600/85 hover:bg-amber-600 text-white text-[11px] font-bold shadow-sm border border-amber-500/60 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  title="Hold this bill without updating stock"
+                >
+                  <PauseCircle className="w-3.5 h-3.5 text-amber-200" />
+                  <span>Hold Bill</span>
                 </button>
                 <button
                   type="button"
@@ -1529,33 +2019,21 @@ export const AdminRestock: React.FC = () => {
                                 #{idx + 1}
                               </td>
 
-                              {/* Product Selector (Filtered by Selected Supplier, Enter navigates to Expiry) */}
-                              <td className="py-2 px-2">
-                                <select
-                                  id={`line-item-${idx}-product`}
-                                  value={item.productId}
-                                  onChange={(e) =>
-                                    handleUpdateLineItem(item.id, { productId: e.target.value })
+                              {/* Product Autocomplete Selector (Filtered by Selected Supplier, Letter-by-letter matching) */}
+                              <td className="py-2 px-2 relative">
+                                <LineItemProductAutocomplete
+                                  idx={idx}
+                                  item={item}
+                                  products={products}
+                                  supplierFilteredProducts={supplierFilteredProducts}
+                                  studioSupplierId={studioSupplierId}
+                                  supplierName={suppliers.find((s) => s.id === studioSupplierId)?.name}
+                                  onSelectProduct={(newProductId) =>
+                                    handleUpdateLineItem(item.id, { productId: newProductId })
                                   }
-                                  onKeyDown={(e) => handleKeyDownNav(e, idx, 'product')}
-                                  className="w-full bg-transparent border-0 border-b-2 border-transparent hover:border-stone-200 focus:border-[#00b4b6] focus:outline-none font-semibold text-stone-800 text-[11px] cursor-pointer truncate py-0.5 transition-colors"
-                                >
-                                  <option value="">
-                                    {studioSupplierId ? '-- Select Product --' : '-- Select Supplier First --'}
-                                  </option>
-                                  {(() => {
-                                    let list = supplierFilteredProducts;
-                                    if (item.productId && !list.some((p) => p.id === item.productId)) {
-                                      const currentP = products.find((p) => p.id === item.productId);
-                                      if (currentP) list = [currentP, ...list];
-                                    }
-                                    return list.map((p) => (
-                                      <option key={p.id} value={p.id}>
-                                        {p.name} {p.weight ? `(${p.weight})` : ''}
-                                      </option>
-                                    ));
-                                  })()}
-                                </select>
+                                  onNavigateNext={() => focusField(idx, 'expiry')}
+                                  onNavigatePrev={() => (idx > 0 ? focusField(idx - 1, 'qty') : null)}
+                                />
                               </td>
 
                               {/* Auto-generated Batch # (Balanced column, no regenerate button) */}
@@ -2054,6 +2532,88 @@ export const AdminRestock: React.FC = () => {
                   <span>
                     Lead Time: <strong className="text-stone-900 font-bold">{newSupLeadTime || 2}d</strong>
                   </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* HELD RESTOCK BILLS SELECTION POPUP MODAL (LIGHT THEME, SINGLE LINE ROWS)   */}
+      {/* ========================================================================= */}
+      {isHeldPickerModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white text-stone-900 rounded-2xl w-full max-w-[460px] sm:max-w-[480px] p-3.5 sm:p-4 shadow-2xl border border-stone-200 overflow-hidden">
+            <div className="flex items-center gap-3 sm:gap-3.5">
+              {/* Left Side: Panda Hold Image (Bigger Size) */}
+              <div className="shrink-0 flex items-center justify-center select-none">
+                <img
+                  src="/hold.png"
+                  alt="Hold Mascot"
+                  className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-md select-none pointer-events-none transition-transform hover:scale-105 duration-200"
+                />
+              </div>
+
+              {/* Right Side: Header & Single-Line Rows */}
+              <div className="flex-1 min-w-0">
+                {/* Header */}
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-stone-100">
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-xs sm:text-sm font-black text-stone-900 tracking-tight">
+                      Held Restock Bills
+                    </h3>
+                    <span className="bg-orange-100 text-[#FF5500] text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full">
+                      {heldPOs.length}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsHeldPickerModalOpen(false)}
+                    className="w-5 h-5 rounded-full hover:bg-stone-100 text-stone-400 hover:text-stone-700 flex items-center justify-center transition-colors cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Single-Line Rows of Held Bills */}
+                <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-0.5">
+                  {heldPOs.map((po) => (
+                    <div
+                      key={po.id}
+                      onClick={() => handleResumeHeldPO(po)}
+                      className="group flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg bg-stone-50 hover:bg-orange-50/70 border border-stone-200/80 hover:border-orange-300 transition-colors cursor-pointer"
+                    >
+                      {/* Left: Invoice Ref & Supplier Name in single line */}
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span className="font-mono text-[10.5px] font-bold text-[#FF5500] shrink-0">
+                          {po.invoiceRef}
+                        </span>
+                        <span className="text-[11px] font-bold text-stone-800 truncate">
+                          {po.supplierName}
+                        </span>
+                      </div>
+
+                      {/* Right: Actions */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteHeldPO(po.id, e)}
+                          className="w-5 h-5 rounded hover:bg-rose-50 text-stone-400 hover:text-rose-600 flex items-center justify-center transition-colors cursor-pointer"
+                          title="Discard draft"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleResumeHeldPO(po)}
+                          className="px-2 py-0.5 rounded bg-[#FF5500] hover:bg-[#e04b00] text-white text-[10px] font-bold shadow-xs transition-colors cursor-pointer active:scale-95"
+                        >
+                          Resume
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>

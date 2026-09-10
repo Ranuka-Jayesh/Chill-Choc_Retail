@@ -81,7 +81,7 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
   tagline = 'Cool vibe sweet bite',
   className = '',
 }) => {
-  const cfg = LABEL_SIZE_CONFIGS[labelSize] || LABEL_SIZE_CONFIGS['40x20'];
+  const cfg = LABEL_SIZE_CONFIGS[labelSize] || LABEL_SIZE_CONFIGS['30x22'];
   const { cleanTitle, measurement } = extractProductMeasurement(productName, weight);
   const cleanBarcode = sanitizeCode39(barcode);
 
@@ -125,9 +125,10 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
     const showTagline = cfg.showTagline;
     const titleLines = wrapProductTitle(cleanTitle, cfg.widthMm >= 40 ? 25 : 18);
 
-    // Dynamic vertical balancing based on label height (20mm, 25mm, 30mm)
+    // Dynamic vertical balancing based on label height (20mm, 22mm, 25mm, 30mm)
     const is20mm = cfg.heightMm <= 20;
-    const is25mm = cfg.heightMm <= 25 && !is20mm;
+    const is22mm = cfg.heightMm === 22;
+    const is25mm = cfg.heightMm <= 25 && !is20mm && !is22mm;
 
     let brandY = stickerY + 23;
     let taglineY = stickerY + 36;
@@ -135,7 +136,7 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
     let titleY2 = titleY1 + 13;
     let priceY = stickerY + (showTagline ? (titleLines.length > 1 ? 77 : 69) : (titleLines.length > 1 ? 65 : 57));
     let barcodeY = priceY + 9;
-    let barcodeHeight = is20mm ? 25 : is25mm ? 32 : 38;
+    let barcodeHeight = is20mm ? 25 : is22mm ? 30 : is25mm ? 32 : 38;
     let barcodeTextY = barcodeY + barcodeHeight + 11;
 
     // Fine-tune for 20mm height (e.g. 40x20mm, 30x20mm)
@@ -159,6 +160,15 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
         barcodeHeight = 26;
         barcodeTextY = barcodeY + barcodeHeight + 11;
       }
+    } else if (is22mm) {
+      // 30x22 responsive mini (tagline hidden, 2mm extra height for clean barcode clearance)
+      brandY = stickerY + 23;
+      titleY1 = stickerY + 43;
+      titleY2 = titleY1 + 13;
+      priceY = stickerY + (titleLines.length > 1 ? 73 : 63);
+      barcodeY = priceY + 9;
+      barcodeHeight = titleLines.length > 1 ? 26 : 30;
+      barcodeTextY = barcodeY + barcodeHeight + 11;
     } else if (is25mm) {
       // 25mm height (35x25, 40x25)
       brandY = stickerY + 25;

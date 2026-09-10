@@ -31,6 +31,8 @@ class OperatorSyncSocketService {
   private candidateUrls: string[] = [];
   private currentUrlIndex: number = 0;
   private isConnected: boolean = false;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = Infinity;
 
   constructor() {
     // 1. Setup instant cross-tab BroadcastChannel for zero-latency real-time synchronization
@@ -49,22 +51,39 @@ class OperatorSyncSocketService {
 
     // 2. Setup WebSocket candidate URLs
     if (typeof window !== 'undefined') {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      this.candidateUrls = [
-        `${protocol}//${window.location.host}/ws/operators`,
-        `ws://localhost:9200/operators`,
-        `ws://127.0.0.1:9200/operators`,
-      ];
-      this.connect();
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const customWs = (import.meta as any).env?.VITE_WS_URL;
+
+      if (customWs) {
+        this.candidateUrls = [`${customWs}/operators`];
+        this.connect();
+      } else if (isLocalhost) {
+        this.candidateUrls = [
+          `ws://${window.location.host}/ws/operators`,
+          `ws://localhost:9200/operators`,
+          `ws://127.0.0.1:9200/operators`,
+        ];
+        this.connect();
+      } else {
+        // In production on HTTPS: Supabase Realtime & native BroadcastChannel provide full real-time syncing.
+        // Do not attempt to connect to a local /ws path on production domains unless VITE_WS_URL is explicitly set.
+        this.candidateUrls = [];
+      }
     }
   }
 
   public connect() {
-    if (typeof window === 'undefined' || this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
+    if (
+      typeof window === 'undefined' ||
+      this.candidateUrls.length === 0 ||
+      this.isConnecting ||
+      (this.ws && this.ws.readyState === WebSocket.OPEN)
+    ) {
       return;
     }
 
-    const targetUrl = this.candidateUrls[this.currentUrlIndex] || `ws://${window.location.host}/ws/operators`;
+    const targetUrl = this.candidateUrls[this.currentUrlIndex];
+    if (!targetUrl) return;
     this.isConnecting = true;
 
     try {
@@ -73,6 +92,7 @@ class OperatorSyncSocketService {
       this.ws.onopen = () => {
         this.isConnecting = false;
         this.isConnected = true;
+        this.reconnectAttempts = 0;
         this.notifyConnectionListeners(true);
         console.log('[OperatorSyncSocket] Connected to WebSocket at', targetUrl);
         this.send({ type: 'REQUEST_SYNC' });
@@ -115,12 +135,19 @@ class OperatorSyncSocketService {
   }
 
   private scheduleReconnect() {
-    if (this.reconnectTimer) return;
+    if (
+      this.candidateUrls.length === 0 ||
+      this.reconnectTimer ||
+      this.reconnectAttempts >= this.maxReconnectAttempts
+    ) {
+      return;
+    }
+    this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.currentUrlIndex = (this.currentUrlIndex + 1) % (this.candidateUrls.length || 1);
       this.connect();
-    }, 3500);
+    }, 4000);
   }
 
   public subscribe(listener: Listener): () => void {
