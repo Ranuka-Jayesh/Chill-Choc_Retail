@@ -371,8 +371,69 @@ export const AdminProducts: React.FC = () => {
   const [newBrand, setNewBrand] = useState('');
   const [newLowStock, setNewLowStock] = useState('5');
   const [newIsAvailable, setNewIsAvailable] = useState(true);
+  const [newIsCompanyProduct, setNewIsCompanyProduct] = useState(false);
+  const [newBarcode, setNewBarcode] = useState('');
   const [newPhotoData, setNewPhotoData] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus barcode input when Company Product is ticked in Add Modal
+  useEffect(() => {
+    if (isAddModalOpen && newIsCompanyProduct) {
+      const timer = setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [isAddModalOpen, newIsCompanyProduct]);
+
+  // Hardware Barcode Scanner listener for Add Product modal
+  useEffect(() => {
+    if (!isAddModalOpen || !newIsCompanyProduct) return;
+
+    let buffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // If focused inside the barcode input, let standard input handling occur
+      if (document.activeElement === barcodeInputRef.current) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Ignore if user is typing into other text fields (e.g. name, weight, brand)
+      const target = e.target as HTMLElement;
+      if (target && target.tagName === 'INPUT' && target !== barcodeInputRef.current) {
+        return;
+      }
+
+      const currentTime = Date.now();
+      const isFast = currentTime - lastKeyTime < 60;
+      lastKeyTime = currentTime;
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= 3) {
+          e.preventDefault();
+          setNewBarcode(buffer);
+          showToast(`Scanned barcode: ${buffer}`, 'success');
+          barcodeInputRef.current?.focus();
+        }
+        buffer = '';
+      } else if (e.key.length === 1) {
+        if (!isFast && buffer.length > 0) {
+          buffer = '';
+        }
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [isAddModalOpen, newIsCompanyProduct]);
 
   // Name Autocomplete Suggestions from Database
   const [showNameSuggestions, setShowNameSuggestions] = useState(false);
@@ -460,8 +521,21 @@ export const AdminProducts: React.FC = () => {
   const [editBrand, setEditBrand] = useState('');
   const [editLowStock, setEditLowStock] = useState('5');
   const [editIsAvailable, setEditIsAvailable] = useState(true);
+  const [editIsCompanyProduct, setEditIsCompanyProduct] = useState(false);
+  const [editBarcode, setEditBarcode] = useState('');
   const [editPhotoData, setEditPhotoData] = useState('');
   const editFileInputRef = useRef<HTMLInputElement>(null);
+  const editBarcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus barcode input when Company Product is ticked in Edit Modal
+  useEffect(() => {
+    if (productToEdit && editIsCompanyProduct) {
+      const timer = setTimeout(() => {
+        editBarcodeInputRef.current?.focus();
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [productToEdit, editIsCompanyProduct]);
 
   // Quick toggle availability directly from product card action dock
   const handleToggleAvailability = (e: React.MouseEvent, prod: Product) => {
@@ -486,6 +560,8 @@ export const AdminProducts: React.FC = () => {
     setEditBrand(prod.brand || '');
     setEditLowStock(prod.lowStockThreshold?.toString() || '5');
     setEditIsAvailable(prod.isAvailable !== false);
+    setEditIsCompanyProduct(Boolean(prod.isCompanyProduct));
+    setEditBarcode(prod.barcode || '');
     setEditPhotoData(prod.imageUrl || '');
   };
 
@@ -520,6 +596,23 @@ export const AdminProducts: React.FC = () => {
       return;
     }
 
+    if (editIsCompanyProduct && !editBarcode.trim()) {
+      showToast('Please enter or scan a barcode for this company product', 'error');
+      editBarcodeInputRef.current?.focus();
+      return;
+    }
+
+    if (editIsCompanyProduct && editBarcode.trim() && editBarcode.trim() !== productToEdit.barcode) {
+      const duplicate = products.find(
+        (p) => p.id !== productToEdit.id && p.barcode.trim() === editBarcode.trim()
+      );
+      if (duplicate) {
+        showToast(`Barcode "${editBarcode.trim()}" is already assigned to "${duplicate.name}"`, 'error');
+        editBarcodeInputRef.current?.focus();
+        return;
+      }
+    }
+
     updateProduct(productToEdit.id, {
       name: editName.trim(),
       weight: editWeight.trim() || '1 pc',
@@ -528,6 +621,8 @@ export const AdminProducts: React.FC = () => {
       lowStockThreshold: parseInt(editLowStock) || 5,
       imageUrl: editPhotoData || undefined,
       isAvailable: editIsAvailable,
+      isCompanyProduct: editIsCompanyProduct,
+      barcode: editIsCompanyProduct ? editBarcode.trim() : productToEdit.barcode,
     });
 
     showToast(`Updated "${editName}" successfully!`, 'success');
@@ -678,6 +773,21 @@ export const AdminProducts: React.FC = () => {
       return;
     }
 
+    if (newIsCompanyProduct && !newBarcode.trim()) {
+      showToast('Please enter or scan a barcode for this company product', 'error');
+      barcodeInputRef.current?.focus();
+      return;
+    }
+
+    if (newIsCompanyProduct && newBarcode.trim()) {
+      const duplicate = products.find((p) => p.barcode.trim() === newBarcode.trim());
+      if (duplicate) {
+        showToast(`Barcode "${newBarcode.trim()}" is already assigned to "${duplicate.name}"`, 'error');
+        barcodeInputRef.current?.focus();
+        return;
+      }
+    }
+
     const created = addProduct({
       name: newName.trim(),
       weight: newWeight.trim() || '50g',
@@ -686,6 +796,8 @@ export const AdminProducts: React.FC = () => {
       imageUrl: newPhotoData || undefined,
       lowStockThreshold: Math.max(1, parseInt(newLowStock) || 5),
       isAvailable: newIsAvailable,
+      isCompanyProduct: newIsCompanyProduct,
+      barcode: newIsCompanyProduct ? newBarcode.trim() : undefined,
     });
 
     showToast(`Product "${created.name}" created! Restock it to set pricing & suppliers.`, 'success');
@@ -698,6 +810,8 @@ export const AdminProducts: React.FC = () => {
     setNewBrand('');
     setNewLowStock('5');
     setNewIsAvailable(true);
+    setNewIsCompanyProduct(false);
+    setNewBarcode('');
     setNewPhotoData('');
     setShowNameSuggestions(false);
     setActiveSuggestionIndex(-1);
@@ -832,19 +946,19 @@ export const AdminProducts: React.FC = () => {
                     <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/45 via-50% to-black/25 pointer-events-none" />
 
                     {/* Top Floating Badges (Category & Stock) */}
-                    <div className="relative z-10 p-2 sm:p-2.5 flex items-center justify-between pointer-events-auto">
+                    <div className="relative z-10 p-2 sm:p-2.5 flex items-center justify-between gap-1 pointer-events-auto">
                       {/* Category Pill */}
-                      <span className="px-2 py-0.5 rounded-full bg-black/80 border border-white/20 text-[10px] font-bold text-white/95 capitalize flex items-center gap-1 shadow-xs">
+                      <span className="px-1.5 py-0.5 rounded-full bg-black/80 border border-white/20 text-[9px] font-bold text-white/95 capitalize flex items-center gap-1 shadow-xs min-w-0 shrink">
                         <CategoryIconComponent
                           name={categories.find((c) => c.id === prod.category)?.icon || 'Tag'}
-                          className="w-2.5 h-2.5 text-[#FF5500]"
+                          className="w-2.5 h-2.5 text-[#FF5500] shrink-0"
                         />
-                        <span className="truncate max-w-[65px] sm:max-w-[85px]">{prod.category}</span>
+                        <span className="truncate max-w-[55px] sm:max-w-[75px]">{prod.category}</span>
                       </span>
 
                       {/* Stock Badge */}
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-tight shadow-xs flex items-center gap-1 ${
+                        className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold tracking-tight shadow-xs flex items-center gap-1 shrink-0 whitespace-nowrap ${
                           stockStatus.isOutOfStock || stockStatus.isAllExpired
                             ? 'bg-rose-600 text-white'
                             : stockStatus.isPartialExpired
@@ -854,8 +968,8 @@ export const AdminProducts: React.FC = () => {
                             : 'bg-emerald-600 text-white'
                         }`}
                       >
-                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                        {stockStatus.displayText}
+                        <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />
+                        <span>{stockStatus.displayText}</span>
                       </span>
                     </div>
 
@@ -881,9 +995,16 @@ export const AdminProducts: React.FC = () => {
 
                       {/* Weight & Price Row */}
                       <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-zinc-300 font-medium drop-shadow-xs">
-                          {prod.weight}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-zinc-300 font-medium drop-shadow-xs">
+                            {prod.weight}
+                          </span>
+                          {prod.isCompanyProduct && (
+                            <span className="px-1 py-0.2 rounded bg-amber-400/20 border border-amber-300/30 text-amber-300 text-[8px] font-bold">
+                              Company
+                            </span>
+                          )}
+                        </div>
 
                         <div>
                           {prod.price > 0 ? (
@@ -1022,6 +1143,12 @@ export const AdminProducts: React.FC = () => {
                               <span className="text-[11.5px] font-semibold text-zinc-900 group-hover:text-[#FF5500] transition-colors truncate">
                                 {prod.name}
                               </span>
+                              {prod.isCompanyProduct && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[8.5px] font-bold flex items-center gap-0.5 flex-shrink-0" title="Company Product">
+                                  <Building2 className="w-2.5 h-2.5 text-amber-600" />
+                                  Company
+                                </span>
+                              )}
                               {!isAvailable && (
                                 <span className="px-1 py-0.2 rounded bg-rose-50 border border-rose-200 text-rose-600 text-[8px] font-bold flex items-center gap-0.5 flex-shrink-0">
                                   <Ban className="w-2.5 h-2.5" />
@@ -1521,6 +1648,60 @@ export const AdminProducts: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
+                {/* Company Product Checkbox & Barcode Input */}
+                <div className="pt-1">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={newIsCompanyProduct}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setNewIsCompanyProduct(checked);
+                        if (checked) {
+                          setTimeout(() => barcodeInputRef.current?.focus(), 80);
+                        }
+                      }}
+                      className="w-3.5 h-3.5 text-[#FF5500] rounded border-zinc-300 focus:ring-0 cursor-pointer accent-[#FF5500]"
+                    />
+                    <span className="text-xs font-bold text-zinc-700">Company Product</span>
+                  </label>
+                </div>
+
+                {newIsCompanyProduct && (
+                  <div className="space-y-1">
+                    <label className="font-bold text-zinc-700 text-xs">Barcode *</label>
+                    <div className="relative">
+                      <input
+                        ref={barcodeInputRef}
+                        type="text"
+                        value={newBarcode}
+                        onChange={(e) => setNewBarcode(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                          }
+                        }}
+                        placeholder="Scan or enter barcode"
+                        required
+                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-zinc-900 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#FF5500]"
+                      />
+                      {newBarcode && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewBarcode('');
+                            barcodeInputRef.current?.focus();
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 p-0.5 rounded-full hover:bg-zinc-100 cursor-pointer"
+                          title="Clear barcode"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Form Action (Full Width Orange Button) */}
@@ -1865,6 +2046,60 @@ export const AdminProducts: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
+                {/* Company Product Checkbox & Barcode Input */}
+                <div className="pt-1">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={editIsCompanyProduct}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setEditIsCompanyProduct(checked);
+                        if (checked) {
+                          setTimeout(() => editBarcodeInputRef.current?.focus(), 80);
+                        }
+                      }}
+                      className="w-3.5 h-3.5 text-[#FF5500] rounded border-zinc-300 focus:ring-0 cursor-pointer accent-[#FF5500]"
+                    />
+                    <span className="text-xs font-bold text-zinc-700">Company Product</span>
+                  </label>
+                </div>
+
+                {editIsCompanyProduct && (
+                  <div className="space-y-1">
+                    <label className="font-bold text-zinc-700 text-xs">Barcode *</label>
+                    <div className="relative">
+                      <input
+                        ref={editBarcodeInputRef}
+                        type="text"
+                        value={editBarcode}
+                        onChange={(e) => setEditBarcode(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                          }
+                        }}
+                        placeholder="Scan or enter barcode"
+                        required
+                        className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-zinc-900 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#FF5500]"
+                      />
+                      {editBarcode && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditBarcode('');
+                            editBarcodeInputRef.current?.focus();
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 p-0.5 rounded-full hover:bg-zinc-100 cursor-pointer"
+                          title="Clear barcode"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Form Action */}

@@ -3,6 +3,8 @@ import { Supplier } from '@/types';
 import {
   fetchSuppliersFromSupabase,
   upsertSupplierToSupabase,
+  updateSupplierInSupabase,
+  syncSupplierProductsInSupabase,
   generateUUID,
 } from '@/services/supabaseData';
 
@@ -10,7 +12,7 @@ interface SupplierContextType {
   suppliers: Supplier[];
   addSupplier: (supplier: Omit<Supplier, 'id' | 'code'>) => Supplier;
   getSupplierById: (id: string) => Supplier | undefined;
-  updateSupplier: (id: string, updates: Partial<Supplier>) => void;
+  updateSupplier: (id: string, updates: Partial<Supplier>) => Promise<{ success: boolean; error?: string }>;
 }
 
 const STORAGE_KEY = 'chill_choc_suppliers';
@@ -70,6 +72,11 @@ export const SupplierProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Sync to Supabase cloud
     upsertSupplierToSupabase(newSupplier);
 
+    // Also sync assigned products if any
+    if (newSupplier.suppliedProductIds && newSupplier.suppliedProductIds.length > 0) {
+      syncSupplierProductsInSupabase(newSupplier.id, newSupplier.suppliedProductIds);
+    }
+
     return newSupplier;
   };
 
@@ -77,17 +84,44 @@ export const SupplierProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return suppliers.find((s) => s.id === id);
   };
 
-  const updateSupplier = (id: string, updates: Partial<Supplier>) => {
-    const updated = suppliers.map((s) => {
-      if (s.id === id) {
-        const mod = { ...s, ...updates };
-        upsertSupplierToSupabase(mod);
-        return mod;
+  const updateSupplier = async (
+    id: string,
+    updates: Partial<Supplier>
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const existing = suppliers.find((s) => s.id === id);
+      if (!existing) {
+        return { success: false, error: 'Supplier not found' };
       }
-      return s;
-    });
-    setSuppliers(updated);
-    persistSuppliers(updated);
+
+      const mod: Supplier = { ...existing, ...updates };
+
+      // Update local state and local storage immediately
+      const updated = suppliers.map((s) => (s.id === id ? mod : s));
+      setSuppliers(updated);
+      persistSuppliers(updated);
+
+      // Sync to Supabase cloud
+      try {
+        await updateSupplierInSupabase(id, updates);
+      } catch (updateErr) {
+        console.warn('Update failed, attempting upsert fallback in Supabase:', updateErr);
+        await upsertSupplierToSupabase(mod);
+      }
+
+      // If suppliedProductIds were updated, sync products in Supabase
+      if (updates.suppliedProductIds !== undefined) {
+        await syncSupplierProductsInSupabase(id, updates.suppliedProductIds);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('Failed to update supplier in Supabase:', err);
+      return {
+        success: false,
+        error: err?.message || 'Failed to update supplier in Supabase',
+      };
+    }
   };
 
   return (

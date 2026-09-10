@@ -42,6 +42,7 @@ export interface AddProductInput {
   batchNumber?: string;
   expiryDate?: string;
   isAvailable?: boolean;
+  isCompanyProduct?: boolean;
 }
 
 export interface StockDeductionItem {
@@ -384,7 +385,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
         productId: newId,
         supplierId: productData.initialSupplierId || '',
         supplierName: productData.initialSupplierName || 'Direct Stock',
-        batchNumber: productData.batchNumber || `LOT-${Date.now().toString().slice(-4)}`,
+        batchNumber: productData.batchNumber || barcode || 'BAR-001',
         costPrice: productData.initialCost || 0,
         sellingPrice: productData.price || 0,
         receivedDate: formatBatchDate(new Date()),
@@ -413,6 +414,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       isAvailable: productData.isAvailable !== undefined ? productData.isAvailable : true,
       supplierId: productData.initialSupplierId,
       supplierName: productData.initialSupplierName,
+      isCompanyProduct: Boolean(productData.isCompanyProduct),
     };
 
     setProducts((prev) => {
@@ -502,6 +504,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         const updatedProd = {
           ...p,
+          barcode: p.barcode || (latestItem?.batchNumber && !latestItem.batchNumber.startsWith('BAT-') ? latestItem.batchNumber : '') || '',
           price: latestItem && latestItem.sellingPrice > 0 ? latestItem.sellingPrice : p.price,
           costPrice: latestItem && latestItem.costPrice > 0 ? latestItem.costPrice : p.costPrice,
           supplierId: p.supplierId || latestItem?.supplierId,

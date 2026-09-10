@@ -44,9 +44,9 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
     initialProduct?.id || products[0]?.id || ''
   );
   const [selectedBatchId, setSelectedBatchId] = useState<string>('all');
-  const [labelSize, setLabelSize] = useState<LabelSize>('30x22');
+  const [labelSize, setLabelSize] = useState<LabelSize>('30x15');
   const labelType: 'barcode' | 'shelftag' = labelSize === '50x30' ? 'shelftag' : 'barcode';
-  const [printerProtocol, setPrinterProtocol] = useState<'escpos' | 'tspl'>('escpos');
+  const [printerProtocol, setPrinterProtocol] = useState<'escpos' | 'tspl'>('tspl');
   const [copies, setCopies] = useState<number>(1);
   const [showRawTspl, setShowRawTspl] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -213,10 +213,14 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
             flex-shrink: 0;
           }
           .barcode-text {
+            width: 100%;
+            max-width: ${cfg.heightMm <= 15 ? '26mm' : `${Math.min(cfg.widthMm - 4, Math.round(cfg.barcodeMaxBarWidth * 0.175))}mm`};
+            display: flex;
+            justify-content: space-between;
+            box-sizing: border-box;
             font-family: "Courier New", Courier, monospace, sans-serif;
             font-size: ${cfg.barcodeFontSizePt}pt;
-            font-weight: 700;
-            letter-spacing: 0.8px;
+            font-weight: 800;
             line-height: 1;
             margin-top: 0.25mm;
             color: #000000;
@@ -226,18 +230,24 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
       <body>
     `;
 
+    const targetBarcodeWidthMm =
+      cfg.heightMm <= 15 ? 26 : Math.min(cfg.widthMm - 4, Math.round(cfg.barcodeMaxBarWidth * 0.175));
+    const bcDigitsSpacedHtml = activeBarcode
+      .split('')
+      .map((ch: string) => `<span>${ch}</span>`)
+      .join('');
+
     for (let c = 0; c < copies; c++) {
       htmlContent += `
         <div class="label-page">
           <div class="label-text-block">
-            <div class="brand-title">Chill&amp;Chock</div>
+            ${cfg.heightMm > 15 ? `<div class="brand-title">Chill&amp;Chock</div>` : ''}
             ${cfg.showTagline ? `<div class="brand-tagline">Cool vibe sweet bite</div>` : ''}
             <div class="prod-title">${cleanTitle}</div>
             <div class="price-big">Rs. ${formattedPrice}${measurementSuffix}</div>
           </div>
           <div class="barcode-box">
-            ${generateBarcodeSvgHtml(activeBarcode, cfg.barcodeSvgHeight, 34)}
-            <div class="barcode-text">${activeBarcode}</div>
+            ${generateBarcodeSvgHtml(activeBarcode, cfg.barcodeSvgHeight, targetBarcodeWidthMm, true)}
           </div>
         </div>
       `;
@@ -382,23 +392,23 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
               <div className="flex items-center gap-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-[10px] font-bold">
                 <button
                   type="button"
+                  onClick={() => setPrinterProtocol('tspl')}
+                  className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                    printerProtocol === 'tspl' ? 'bg-black text-white shadow-2xs' : 'text-zinc-600 hover:text-black'
+                  }`}
+                  title="Native TSPL command language for Xprinter XP-365B direct thermal label printer"
+                >
+                  XP-365B (TSPL)
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPrinterProtocol('escpos')}
                   className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
                     printerProtocol === 'escpos' ? 'bg-black text-white shadow-2xs' : 'text-zinc-600 hover:text-black'
                   }`}
                   title="ESC/POS commands for Xprinter XP-80TS"
                 >
-                  XP-80TS
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrinterProtocol('tspl')}
-                  className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
-                    printerProtocol === 'tspl' ? 'bg-black text-white shadow-2xs' : 'text-zinc-600 hover:text-black'
-                  }`}
-                  title="TSPL for dedicated label printers (XP-365B, Zebra)"
-                >
-                  TSPL
+                  XP-80TS (ESC/POS)
                 </button>
               </div>
             </div>
@@ -407,7 +417,7 @@ export const ProductLabelModal: React.FC<ProductLabelModalProps> = ({
                 Sticker Size
               </span>
               <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-zinc-200">
-                {ORDERED_LABEL_SIZES.slice(0, 3).map((sizeKey) => {
+                {ORDERED_LABEL_SIZES.slice(0, 4).map((sizeKey) => {
                   const sCfg = LABEL_SIZE_CONFIGS[sizeKey];
                   const isSelected = labelSize === sizeKey;
                   return (

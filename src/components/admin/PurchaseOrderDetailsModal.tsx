@@ -592,7 +592,7 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
                 <tr>
                   <th className="py-1.5 px-2 w-[40px] text-center">#</th>
                   <th className="py-1.5 px-2">Item Name</th>
-                  <th className="py-1.5 px-2">Batch / Lot #</th>
+                  <th className="py-1.5 px-2">Barcode</th>
                   <th className="py-1.5 px-2 text-center">Expiry (YYYY/MM/DD)</th>
                   <th className="py-1.5 px-2 text-right">Cost (Rs.)</th>
                   <th className="py-1.5 px-2 text-center w-[85px]">
@@ -631,7 +631,7 @@ export const PurchaseOrderDetailsModal: React.FC<PurchaseOrderDetailsModalProps>
                         </div>
                       </td>
 
-                      {/* Batch / Lot # (Read-Only) */}
+                      {/* Barcode (Read-Only) */}
                       <td className="py-2.5 px-2 font-mono font-bold text-stone-800 text-[11px] select-all">
                         {it.batchNumber || '-'}
                       </td>

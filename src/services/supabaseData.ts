@@ -180,6 +180,7 @@ export async function fetchProductsFromSupabase(): Promise<Product[]> {
       imageUrl: p.image_url || '',
       description: p.description || '',
       isAvailable: p.is_available !== false,
+      isCompanyProduct: Boolean(p.is_company_product),
       supplierId: p.supplier_id || undefined,
       batches: batchesByProduct.get(p.id) || [],
     }));
@@ -262,6 +263,7 @@ export async function upsertProductToSupabase(p: Product) {
       image_url: p.imageUrl || null,
       description: p.description || null,
       is_available: p.isAvailable !== false,
+      is_company_product: Boolean(p.isCompanyProduct),
       supplier_id: isValidUUID(p.supplierId) ? p.supplierId : null,
     }, { onConflict: 'id' }).select().single();
 
@@ -397,7 +399,10 @@ export async function fetchSuppliersFromSupabase(): Promise<Supplier[]> {
       email: s.email || '',
       address: s.address || '',
       leadTimeDays: Number(s.lead_time_days || 2),
-      status: s.status as 'Active' | 'Inactive',
+      rating: s.rating !== null && s.rating !== undefined ? Number(s.rating) : 5.0,
+      since: s.since_date || undefined,
+      status: (s.status as 'Active' | 'Inactive') || 'Active',
+      isCompanySupplier: Boolean(s.is_company_supplier),
     }));
   } catch (err) {
     console.warn('Supabase fetch suppliers failed:', err);
@@ -408,7 +413,7 @@ export async function fetchSuppliersFromSupabase(): Promise<Supplier[]> {
 export async function upsertSupplierToSupabase(s: Supplier) {
   try {
     const id = isValidUUID(s.id) ? s.id : generateUUID();
-    const { data, error } = await supabase.from('suppliers').upsert({
+    const payload: any = {
       id,
       code: s.code,
       name: s.name,
@@ -419,13 +424,113 @@ export async function upsertSupplierToSupabase(s: Supplier) {
       address: s.address || null,
       lead_time_days: s.leadTimeDays || 2,
       status: s.status || 'Active',
-    }, { onConflict: 'id' }).select().single();
+      is_company_supplier: Boolean(s.isCompanySupplier),
+      updated_at: new Date().toISOString(),
+    };
+    if (s.rating !== undefined) payload.rating = s.rating;
+    if (s.since) payload.since_date = s.since;
 
-    if (error) console.warn('Supabase upsert supplier error:', error.message);
+    const { data, error } = await supabase
+      .from('suppliers')
+      .upsert(payload, { onConflict: 'id' })
+      .select()
+      .single();
+
+    if (error) {
+      console.warn('Supabase upsert supplier error, trying onConflict code:', error.message);
+      const { data: codeData, error: codeErr } = await supabase
+        .from('suppliers')
+        .upsert(payload, { onConflict: 'code' })
+        .select()
+        .single();
+      if (codeErr) throw codeErr;
+      return codeData;
+    }
     return data;
   } catch (err) {
     console.warn('Supabase upsert supplier failed:', err);
     return null;
+  }
+}
+
+export async function updateSupplierInSupabase(id: string, updates: Partial<Supplier>) {
+  try {
+    const payload: any = {
+      updated_at: new Date().toISOString(),
+    };
+    if (updates.name !== undefined) payload.name = updates.name.trim();
+    if (updates.code !== undefined) payload.code = updates.code.trim();
+    if (updates.brand !== undefined) payload.brand = updates.brand ? updates.brand.trim() : null;
+    if (updates.contactPerson !== undefined) payload.contact_person = updates.contactPerson ? updates.contactPerson.trim() : null;
+    if (updates.phone !== undefined) payload.phone = updates.phone.trim();
+    if (updates.email !== undefined) payload.email = updates.email ? updates.email.trim() : null;
+    if (updates.address !== undefined) payload.address = updates.address ? updates.address.trim() : null;
+    if (updates.leadTimeDays !== undefined) payload.lead_time_days = Number(updates.leadTimeDays) || 2;
+    if (updates.rating !== undefined) payload.rating = Number(updates.rating) || 5.0;
+    if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.isCompanySupplier !== undefined) payload.is_company_supplier = Boolean(updates.isCompanySupplier);
+
+    let res: any;
+    if (isValidUUID(id)) {
+      res = await supabase
+        .from('suppliers')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .single();
+    } else {
+      res = await supabase
+        .from('suppliers')
+        .update(payload)
+        .eq('code', updates.code || id)
+        .select()
+        .single();
+    }
+
+    if (res.error) {
+      console.warn('Supabase update supplier error:', res.error.message);
+      throw res.error;
+    }
+
+    return res.data;
+  } catch (err) {
+    console.warn('Supabase update supplier failed:', err);
+    throw err;
+  }
+}
+
+export async function syncSupplierProductsInSupabase(supplierId: string, assignedProductIds: string[] = []) {
+  try {
+    if (!isValidUUID(supplierId)) return;
+
+    if (assignedProductIds.length > 0) {
+      const validIds = assignedProductIds.filter(isValidUUID);
+      if (validIds.length > 0) {
+        // Clear products not in the new assigned list
+        const { error: clearErr } = await supabase
+          .from('products')
+          .update({ supplier_id: null })
+          .eq('supplier_id', supplierId)
+          .not('id', 'in', `(${validIds.join(',')})`);
+        if (clearErr) console.warn('Supabase clear unassigned products error:', clearErr.message);
+
+        // Assign selected products
+        const { error: assignErr } = await supabase
+          .from('products')
+          .update({ supplier_id: supplierId })
+          .in('id', validIds);
+        if (assignErr) console.warn('Supabase assign products error:', assignErr.message);
+      }
+    } else {
+      // If list is empty, unassign all products from this supplier
+      const { error: clearAllErr } = await supabase
+        .from('products')
+        .update({ supplier_id: null })
+        .eq('supplier_id', supplierId);
+      if (clearAllErr) console.warn('Supabase clear all supplier products error:', clearAllErr.message);
+    }
+  } catch (err) {
+    console.warn('Failed to sync supplier products in Supabase:', err);
   }
 }
 

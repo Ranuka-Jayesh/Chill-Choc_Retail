@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     lead_time_days INT DEFAULT 3,
     rating NUMERIC(3,2) DEFAULT 5.00,
     status VARCHAR(20) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive')),
+    is_company_supplier BOOLEAN NOT NULL DEFAULT false,
     since_date DATE,
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -130,6 +131,7 @@ CREATE TABLE IF NOT EXISTS products (
     image_url TEXT,
     description TEXT,
     is_available BOOLEAN NOT NULL DEFAULT true,
+    is_company_product BOOLEAN NOT NULL DEFAULT false,
     supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())

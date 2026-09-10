@@ -125,10 +125,11 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
     const showTagline = cfg.showTagline;
     const titleLines = wrapProductTitle(cleanTitle, cfg.widthMm >= 40 ? 25 : 18);
 
-    // Dynamic vertical balancing based on label height (20mm, 22mm, 25mm, 30mm)
-    const is20mm = cfg.heightMm <= 20;
+    // Dynamic vertical balancing based on label height (15mm, 20mm, 22mm, 25mm, 30mm)
+    const is15mm = cfg.heightMm <= 15;
+    const is20mm = cfg.heightMm <= 20 && !is15mm;
     const is22mm = cfg.heightMm === 22;
-    const is25mm = cfg.heightMm <= 25 && !is20mm && !is22mm;
+    const is25mm = cfg.heightMm <= 25 && !is15mm && !is20mm && !is22mm;
 
     let brandY = stickerY + 23;
     let taglineY = stickerY + 36;
@@ -136,11 +137,19 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
     let titleY2 = titleY1 + 13;
     let priceY = stickerY + (showTagline ? (titleLines.length > 1 ? 77 : 69) : (titleLines.length > 1 ? 65 : 57));
     let barcodeY = priceY + 9;
-    let barcodeHeight = is20mm ? 25 : is22mm ? 30 : is25mm ? 32 : 38;
+    let barcodeHeight = is15mm ? 20 : is20mm ? 25 : is22mm ? 30 : is25mm ? 32 : 38;
     let barcodeTextY = barcodeY + barcodeHeight + 11;
 
-    // Fine-tune for 20mm height (e.g. 40x20mm, 30x20mm)
-    if (is20mm) {
+    if (is15mm) {
+      // 30x15 mm ultra-compact format: Top Product Name -> Center Barcode -> Bottom Price
+      brandY = 0;
+      titleY1 = stickerY + 16;
+      titleY2 = titleY1 + 11;
+      barcodeY = stickerY + (titleLines.length > 1 ? 26 : 24);
+      barcodeHeight = titleLines.length > 1 ? 18 : 22;
+      barcodeTextY = barcodeY + barcodeHeight + 10;
+      priceY = stickerY + (titleLines.length > 1 ? 86 : 82);
+    } else if (is20mm) {
       if (showTagline) {
         brandY = stickerY + 21;
         taglineY = stickerY + 33;
@@ -197,8 +206,10 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
     const startX = centerX - targetBcWidth / 2;
 
     return {
+      is15mm,
       stickerWidth,
       stickerHeight,
+      targetBcWidth,
       stickerX,
       stickerY,
       stickerBottom,
@@ -284,29 +295,31 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
           y={layout.stickerY}
           width={layout.stickerWidth}
           height={layout.stickerHeight}
-          rx={cfg.heightMm <= 20 ? 14 : 16}
-          ry={cfg.heightMm <= 20 ? 14 : 16}
+          rx={cfg.heightMm <= 15 ? 10 : cfg.heightMm <= 20 ? 14 : 16}
+          ry={cfg.heightMm <= 15 ? 10 : cfg.heightMm <= 20 ? 14 : 16}
           fill="#ffffff"
           stroke="#000000"
           strokeWidth="2"
         />
 
-        {/* 1. Shop Name: Bold Font matching label design */}
-        <text
-          x={layout.centerX}
-          y={layout.brandY}
-          textAnchor="middle"
-          fill="#000000"
-          fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
-          fontWeight="900"
-          fontSize={cfg.heightMm <= 20 ? "17" : "19"}
-          letterSpacing="-0.2px"
-        >
-          {storeName}
-        </text>
+        {/* 1. Shop Name: Bold Font matching label design (hidden on 15mm compact labels) */}
+        {!layout.is15mm && (
+          <text
+            x={layout.centerX}
+            y={layout.brandY}
+            textAnchor="middle"
+            fill="#000000"
+            fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
+            fontWeight="900"
+            fontSize={cfg.heightMm <= 20 ? "17" : "19"}
+            letterSpacing="-0.2px"
+          >
+            {storeName}
+          </text>
+        )}
 
         {/* 2. Tagline: Cool vibe sweet bite (Clean sans-serif regular) */}
-        {layout.showTagline && (
+        {layout.showTagline && !layout.is15mm && (
           <text
             x={layout.centerX}
             y={layout.taglineY}
@@ -328,7 +341,7 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
           fill="#000000"
           fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
           fontWeight="700"
-          fontSize={cleanTitle.length > 30 ? "9.5" : cleanTitle.length > 20 ? "11" : "12"}
+          fontSize={layout.is15mm ? (cleanTitle.length > 20 ? "9" : "10.5") : cleanTitle.length > 30 ? "9.5" : cleanTitle.length > 20 ? "11" : "12"}
         >
           {layout.titleLines[0]}
         </text>
@@ -340,7 +353,7 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
             fill="#000000"
             fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
             fontWeight="700"
-            fontSize={cleanTitle.length > 30 ? "9.5" : cleanTitle.length > 20 ? "11" : "12"}
+            fontSize={layout.is15mm ? (cleanTitle.length > 20 ? "9" : "10.5") : cleanTitle.length > 30 ? "9.5" : cleanTitle.length > 20 ? "11" : "12"}
           >
             {layout.titleLines[1]}
           </text>
@@ -354,13 +367,13 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
           fill="#000000"
           fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
           fontWeight="900"
-          fontSize={cfg.heightMm <= 20 ? "17.5" : "19.5"}
+          fontSize={cfg.heightMm <= 15 ? "15" : cfg.heightMm <= 20 ? "17.5" : "19.5"}
           letterSpacing="-0.4px"
         >
           Rs. {formattedPrice}
           {measurement && (
             <tspan
-              fontSize={cfg.heightMm <= 20 ? "11" : "12.5"}
+              fontSize={cfg.heightMm <= 15 ? "9.5" : cfg.heightMm <= 20 ? "11" : "12.5"}
               fontWeight="700"
               letterSpacing="0"
             >
@@ -382,16 +395,17 @@ export const ThermalLabelDiagramPreview: React.FC<ThermalLabelDiagramPreviewProp
           />
         ))}
 
-        {/* 6. Barcode Digits */}
+        {/* 6. Barcode Digits: Same full width as barcode bars above */}
         <text
-          x={layout.centerX}
+          x={layout.startX}
           y={layout.barcodeTextY}
-          textAnchor="middle"
+          textLength={layout.targetBcWidth}
+          lengthAdjust="spacing"
+          textAnchor="start"
           fill="#000000"
-          fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace, sans-serif"
-          fontWeight="700"
-          fontSize="9.5"
-          letterSpacing="0.8px"
+          fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+          fontWeight="800"
+          fontSize={layout.is15mm ? "8.5" : "9.5"}
         >
           {cleanBarcode}
         </text>

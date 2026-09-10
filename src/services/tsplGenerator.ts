@@ -1,7 +1,7 @@
 import { Product } from '@/types';
 import { extractProductMeasurement } from './labelConfig';
 
-export type LabelSize = '30x20' | '30x22' | '35x25' | '40x20' | '40x25' | '40x30' | '50x30';
+export type LabelSize = '30x15' | '30x20' | '30x22' | '35x25' | '40x20' | '40x25' | '40x30' | '50x30';
 
 export interface TSPLLabelOptions {
   copies?: number;
@@ -9,6 +9,7 @@ export interface TSPLLabelOptions {
   labelSize?: LabelSize;
   storeName?: string;
   batchNumber?: string;
+  direction?: 0 | 1;
 }
 
 function wrapTitle(text: string, maxPerLine: number = 24): string[] {
@@ -45,15 +46,43 @@ function getCode128Modules(val: string): number {
 }
 
 /**
+ * Distribute barcode digits with spacing so they match the full width of the barcode bars
+ */
+function formatFullWidthBarcodeDigits(barcode: string, targetDots: number): string {
+  const clean = barcode.trim();
+  if (clean.length <= 1) return clean;
+  // Font "1" in TSPL is 8x12 dots glyph + 2 dots character spacing = ~10 dots pitch
+  const charPitchDots = 10;
+  const availableChars = Math.floor(targetDots / charPitchDots);
+  if (availableChars <= clean.length) return clean;
+
+  const totalSpaces = availableChars - clean.length;
+  const gaps = clean.length - 1;
+  const baseSpaces = Math.floor(totalSpaces / gaps);
+  const extraSpaces = totalSpaces % gaps;
+
+  let result = '';
+  for (let i = 0; i < clean.length; i++) {
+    result += clean[i];
+    if (i < gaps) {
+      const spacesCount = baseSpaces + (i < extraSpaces ? 1 : 0);
+      result += ' '.repeat(spacesCount);
+    }
+  }
+  return result;
+}
+
+/**
  * Generate TSPL-II commands for thermal barcode label or shelf edge tag
  */
 export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = {}): string {
   const copies = Math.max(1, options.copies || 1);
-  const labelSize = options.labelSize || '30x22';
+  const labelSize = options.labelSize || '30x15';
   const storeName = (options.storeName || 'Chill&Chock').replace(/"/g, "'");
   const tagline = 'Cool vibe sweet bite';
 
   const sizeMap: Record<LabelSize, { w: number; h: number }> = {
+    '30x15': { w: 30, h: 15 },
     '40x20': { w: 40, h: 20 },
     '30x20': { w: 30, h: 20 },
     '30x22': { w: 30, h: 22 },
@@ -62,7 +91,7 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
     '40x30': { w: 40, h: 30 },
     '50x30': { w: 50, h: 30 },
   };
-  const { w: widthMm, h: heightMm } = sizeMap[labelSize] || { w: 30, h: 22 };
+  const { w: widthMm, h: heightMm } = sizeMap[labelSize] || { w: 30, h: 15 };
 
   // Sanitize strings for TSPL text fields
   const cleanName = (product.name || '').replace(/"/g, "'").trim();
@@ -79,9 +108,9 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
   const lines: string[] = [];
 
   lines.push(`SIZE ${widthMm} mm, ${heightMm} mm`);
-  lines.push('GAP 2 mm, 0 mm');
+  lines.push(heightMm <= 15 ? 'GAP 3 mm, 0 mm' : 'GAP 2 mm, 0 mm');
   lines.push('REFERENCE 0, 0');
-  lines.push('DIRECTION 1,0');
+  lines.push(`DIRECTION ${options.direction ?? 0},0`);
   lines.push('CLS');
 
   // Center-aligned TSPL elements
@@ -91,16 +120,19 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
   let tsplNarrow = 1;
   let barcodeStartX = 10;
   let barcodeHeight = 32;
+  let barcodeWidth = 120;
 
   if (cleanBarcode) {
     const totalModules = getCode128Modules(cleanBarcode);
     const widthDots = widthMm * 8;
     const printableDots = widthDots - 16; // 8 dots (~1.0mm) minimum margin
     tsplNarrow = Math.floor(printableDots / totalModules) >= 2 ? 2 : 1;
-    const barcodeWidth = totalModules * tsplNarrow;
+    barcodeWidth = totalModules * tsplNarrow;
     barcodeStartX = Math.max(6, Math.round((widthDots - barcodeWidth) / 2));
 
-    if (heightMm <= 20) {
+    if (heightMm <= 15) {
+      barcodeHeight = 40;
+    } else if (heightMm <= 20) {
       barcodeHeight = 52;
     } else if (heightMm <= 22) {
       barcodeHeight = 54;
@@ -111,13 +143,26 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
     }
   }
 
-  if (heightMm <= 20) {
+  if (heightMm <= 15) {
+    // 30x15 mm: Perfectly proportioned 3-tier micro-layout for XP-365B DTTC roll
+    const wrapped = wrapTitle(cleanTitle, 16);
+    lines.push(`TEXT ${centerX}, 4, "2", 0, 1, 1, 2, "${wrapped[0] || cleanTitle}"`);
+    if (cleanBarcode) {
+      // Barcode with human_readable = 0 so we render full-width digits below
+      lines.push(`BARCODE ${barcodeStartX}, 24, "128", 40, 0, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+      const fullWidthDigits = formatFullWidthBarcodeDigits(cleanBarcode, barcodeWidth);
+      lines.push(`TEXT ${centerX}, 66, "1", 0, 1, 1, 2, "${fullWidthDigits}"`);
+    }
+    lines.push(`TEXT ${centerX}, 86, "2", 0, 1, 1, 2, "${priceDisplay}"`);
+  } else if (heightMm <= 20) {
     const wrapped = wrapTitle(cleanTitle, widthMm >= 40 ? 24 : 18);
     lines.push(`TEXT ${centerX}, 4, "2", 0, 1, 1, 2, "${storeName}"`);
     lines.push(`TEXT ${centerX}, 26, "2", 0, 1, 1, 2, "${wrapped[0] || cleanTitle}"`);
     lines.push(`TEXT ${centerX}, 48, "3", 0, 1, 1, 2, "${priceDisplay}"`);
     if (cleanBarcode) {
-      lines.push(`BARCODE ${barcodeStartX}, 74, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+      lines.push(`BARCODE ${barcodeStartX}, 72, "128", ${barcodeHeight - 10}, 0, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+      const fullWidthDigits = formatFullWidthBarcodeDigits(cleanBarcode, barcodeWidth);
+      lines.push(`TEXT ${centerX}, ${72 + barcodeHeight - 8}, "1", 0, 1, 1, 2, "${fullWidthDigits}"`);
     }
   } else if (heightMm <= 22) {
     // 30x22 mm: Perfectly balanced vertical rhythm within 176 dots
@@ -126,7 +171,9 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
     lines.push(`TEXT ${centerX}, 28, "2", 0, 1, 1, 2, "${wrapped[0] || cleanTitle}"`);
     lines.push(`TEXT ${centerX}, 50, "3", 0, 1, 1, 2, "${priceDisplay}"`);
     if (cleanBarcode) {
-      lines.push(`BARCODE ${barcodeStartX}, 78, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+      lines.push(`BARCODE ${barcodeStartX}, 74, "128", ${barcodeHeight - 10}, 0, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+      const fullWidthDigits = formatFullWidthBarcodeDigits(cleanBarcode, barcodeWidth);
+      lines.push(`TEXT ${centerX}, ${74 + barcodeHeight - 8}, "1", 0, 1, 1, 2, "${fullWidthDigits}"`);
     }
   } else if (heightMm <= 25) {
     // 35x25 & 40x25
@@ -138,13 +185,17 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
       lines.push(`TEXT ${centerX}, 56, "2", 0, 1, 1, 2, "${wrapped[1]}"`);
       lines.push(`TEXT ${centerX}, 76, "4", 0, 1, 1, 2, "${priceDisplay}"`);
       if (cleanBarcode) {
-        lines.push(`BARCODE ${barcodeStartX}, 104, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        lines.push(`BARCODE ${barcodeStartX}, 104, "128", ${barcodeHeight - 12}, 0, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        const fullWidthDigits = formatFullWidthBarcodeDigits(cleanBarcode, barcodeWidth);
+        lines.push(`TEXT ${centerX}, ${104 + barcodeHeight - 10}, "1", 0, 1, 1, 2, "${fullWidthDigits}"`);
       }
     } else {
       lines.push(`TEXT ${centerX}, 42, "3", 0, 1, 1, 2, "${wrapped[0]}"`);
       lines.push(`TEXT ${centerX}, 68, "4", 0, 1, 1, 2, "${priceDisplay}"`);
       if (cleanBarcode) {
-        lines.push(`BARCODE ${barcodeStartX}, 98, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        lines.push(`BARCODE ${barcodeStartX}, 98, "128", ${barcodeHeight - 12}, 0, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        const fullWidthDigits = formatFullWidthBarcodeDigits(cleanBarcode, barcodeWidth);
+        lines.push(`TEXT ${centerX}, ${98 + barcodeHeight - 10}, "1", 0, 1, 1, 2, "${fullWidthDigits}"`);
       }
     }
   } else {
@@ -157,13 +208,17 @@ export function generateTSPLLabel(product: Product, options: TSPLLabelOptions = 
       lines.push(`TEXT ${centerX}, 70, "3", 0, 1, 1, 2, "${wrapped[1]}"`);
       lines.push(`TEXT ${centerX}, 94, "4", 0, 1, 1, 2, "${priceDisplay}"`);
       if (cleanBarcode) {
-        lines.push(`BARCODE ${barcodeStartX}, 124, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        lines.push(`BARCODE ${barcodeStartX}, 124, "128", ${barcodeHeight - 12}, 0, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        const fullWidthDigits = formatFullWidthBarcodeDigits(cleanBarcode, barcodeWidth);
+        lines.push(`TEXT ${centerX}, ${124 + barcodeHeight - 10}, "1", 0, 1, 1, 2, "${fullWidthDigits}"`);
       }
     } else {
       lines.push(`TEXT ${centerX}, 52, "4", 0, 1, 1, 2, "${wrapped[0]}"`);
       lines.push(`TEXT ${centerX}, 84, "4", 0, 1, 1, 2, "${priceDisplay}"`);
       if (cleanBarcode) {
-        lines.push(`BARCODE ${barcodeStartX}, 118, "128", ${barcodeHeight}, 2, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        lines.push(`BARCODE ${barcodeStartX}, 118, "128", ${barcodeHeight - 12}, 0, 0, ${tsplNarrow}, ${tsplNarrow * 2}, "${cleanBarcode}"`);
+        const fullWidthDigits = formatFullWidthBarcodeDigits(cleanBarcode, barcodeWidth);
+        lines.push(`TEXT ${centerX}, ${118 + barcodeHeight - 10}, "1", 0, 1, 1, 2, "${fullWidthDigits}"`);
       }
     }
   }

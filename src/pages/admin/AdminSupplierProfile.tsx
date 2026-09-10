@@ -29,7 +29,9 @@ import {
   ChevronRight,
   ExternalLink,
   MapPin,
+  Pencil,
 } from 'lucide-react';
+import { EditSupplierModal } from '@/components/admin/EditSupplierModal';
 
 export const AdminSupplierProfile: React.FC = () => {
   const { supplierId } = useParams<{ supplierId: string }>();
@@ -59,6 +61,7 @@ export const AdminSupplierProfile: React.FC = () => {
 
   // Invoice Inspection Modal
   const [viewingPO, setViewingPO] = useState<PurchaseOrder | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
 
   // Inline "Record New Return to Supplier" drawer state
   const [isAddingReturn, setIsAddingReturn] = useState<boolean>(false);
@@ -322,6 +325,12 @@ export const AdminSupplierProfile: React.FC = () => {
                 {supplier.code}
               </span>
 
+              {supplier.isCompanySupplier && (
+                <span className="text-[9.5px] font-extrabold uppercase tracking-wide px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/80 leading-none">
+                  Company Supplier
+                </span>
+              )}
+
               {supplier.brand && (
                 <span className="text-amber-700 text-[11px] font-bold">
                   ({supplier.brand})
@@ -371,6 +380,17 @@ export const AdminSupplierProfile: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Right: Edit Supplier button */}
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(true)}
+              className="text-amber-800 hover:text-amber-950 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Edit Supplier"
+            >
+              <Pencil className="w-3.5 h-3.5 text-amber-700" />
+              <span>Edit Supplier</span>
+            </button>
           </div>
 
           {/* Row 2: Simple Clean Financial Summary & Month Filter (No Big Box, No Box Borders, No BG Colors) */}
@@ -1134,6 +1154,15 @@ export const AdminSupplierProfile: React.FC = () => {
           isOpen={!!viewingPO}
           onClose={() => setViewingPO(null)}
           purchaseOrder={viewingPO}
+        />
+      )}
+
+      {/* EDIT SUPPLIER MODAL */}
+      {isEditModalOpen && supplier && (
+        <EditSupplierModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          supplier={supplier}
         />
       )}
     </AdminLayout>

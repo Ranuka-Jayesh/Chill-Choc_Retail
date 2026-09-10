@@ -273,6 +273,12 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
                 <span className="text-[11px] text-zinc-400 font-mono">
                   • Barcode: <strong className="text-zinc-700 font-bold">{product.barcode}</strong>
                 </span>
+                {product.isCompanyProduct && (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold flex items-center gap-1 shadow-2xs">
+                    <Building2 className="w-3 h-3 text-amber-600" />
+                    Company Product
+                  </span>
+                )}
                 {/* Available / Unavailable Status */}
                 {product.isAvailable !== false ? (
                   <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold flex items-center gap-1 shadow-2xs">

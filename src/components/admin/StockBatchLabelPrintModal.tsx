@@ -63,10 +63,10 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
   const { products } = useProducts();
   const { showToast } = useToast();
 
-  const [labelSize, setLabelSize] = useState<LabelSize>('30x22');
+  const [labelSize, setLabelSize] = useState<LabelSize>('30x15');
   const labelType: 'barcode' | 'shelftag' = labelSize === '50x30' ? 'shelftag' : 'barcode';
-  // Printer command protocol: 'escpos' (Xprinter XP-80TS) vs 'tspl' (dedicated label printers)
-  const [printerProtocol, setPrinterProtocol] = useState<'escpos' | 'tspl'>('escpos');
+  // Printer command protocol: 'tspl' (XP-365B dedicated label printer) vs 'escpos' (XP-80TS)
+  const [printerProtocol, setPrinterProtocol] = useState<'escpos' | 'tspl'>('tspl');
   // Copies per item ID, defaulting to the quantity restocked
   const [itemCopies, setItemCopies] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
@@ -112,18 +112,19 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
   // Helper to resolve Product entity for TSPL generation
   const resolveProductForTSPL = (item: RestockedItemForPrint): Product => {
     const existing = products.find((p) => p.id === item.productId);
+    const resolvedBarcode = item.barcode || item.batchNumber || existing?.barcode || 'BAR-001';
     if (existing) {
       return {
         ...existing,
         price: item.sellingPrice > 0 ? item.sellingPrice : existing.price,
-        barcode: item.batchNumber || existing.barcode,
+        barcode: resolvedBarcode,
       };
     }
     return {
       id: item.productId,
       name: item.productName,
       sku: item.sku || 'SKU-001',
-      barcode: item.batchNumber || 'BAR-001',
+      barcode: resolvedBarcode,
       weight: item.weight || '',
       price: item.sellingPrice,
       costPrice: item.costPrice,
@@ -286,10 +287,14 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             flex-shrink: 0;
           }
           .barcode-text {
+            width: 100%;
+            max-width: ${cfg.heightMm <= 15 ? '26mm' : `${Math.min(cfg.widthMm - 4, Math.round(cfg.barcodeMaxBarWidth * 0.175))}mm`};
+            display: flex;
+            justify-content: space-between;
+            box-sizing: border-box;
             font-family: "Courier New", Courier, monospace, sans-serif;
             font-size: ${cfg.barcodeFontSizePt}pt;
-            font-weight: 700;
-            letter-spacing: 0.8px;
+            font-weight: 800;
             line-height: 1;
             margin-top: 0.25mm;
             color: #000000;
@@ -309,18 +314,25 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
       const measurementSuffix = measurement ? `<span class="price-unit">/ ${measurement}</span>` : '';
       const dynamicTitleSizePt = getDynamicTitleSizePt(cleanTitle.length, cfg.titleFontSizePt);
 
+      const targetBarcodeWidthMm =
+        cfg.heightMm <= 15 ? 26 : Math.min(cfg.widthMm - 4, Math.round(cfg.barcodeMaxBarWidth * 0.175));
+      const cleanBc = (it.barcode || it.batchNumber || '').trim();
+      const bcDigitsSpacedHtml = cleanBc
+        .split('')
+        .map((ch: string) => `<span>${ch}</span>`)
+        .join('');
+
       for (let c = 0; c < copies; c++) {
         htmlContent += `
           <div class="label-page">
             <div class="label-text-block">
-              <div class="brand-title">Chill&amp;Chock</div>
+              ${cfg.heightMm > 15 ? `<div class="brand-title">Chill&amp;Chock</div>` : ''}
               ${cfg.showTagline ? `<div class="brand-tagline">Cool vibe sweet bite</div>` : ''}
               <div class="prod-title" style="font-size:${dynamicTitleSizePt}pt;">${cleanTitle}</div>
               <div class="price-big">Rs. ${formattedPrice}${measurementSuffix}</div>
             </div>
             <div class="barcode-box">
-              ${generateBarcodeSvgHtml(it.batchNumber, cfg.barcodeSvgHeight, 34)}
-              <div class="barcode-text">${it.batchNumber}</div>
+              ${generateBarcodeSvgHtml(cleanBc, cfg.barcodeSvgHeight, targetBarcodeWidthMm, true)}
             </div>
           </div>
         `;
@@ -348,6 +360,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
   const handlePrintSingle = async (item: RestockedItemForPrint) => {
     const copies = itemCopies[item.id] || item.quantity || 1;
     const prod = resolveProductForTSPL(item);
+    const barcodeToPrint = item.barcode || item.batchNumber;
 
     const printData =
       printerProtocol === 'escpos'
@@ -355,14 +368,14 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             copies,
             labelType,
             labelSize,
-            batchNumber: item.batchNumber,
+            batchNumber: barcodeToPrint,
             storeName: 'Chill&Chock',
           })
         : generateTSPLLabel(prod, {
             copies,
             labelType,
             labelSize,
-            batchNumber: item.batchNumber,
+            batchNumber: barcodeToPrint,
             storeName: 'Chill&Chock',
           });
 
@@ -371,7 +384,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
       try {
         await printLabel({
           data: printData,
-          jobId: `label-${item.batchNumber}-${Date.now()}`,
+          jobId: `label-${barcodeToPrint}-${Date.now()}`,
         });
         showToast(`Printed ${copies}x ${item.productName} barcode labels!`, 'success');
       } catch (err: any) {
@@ -398,20 +411,21 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
         for (const it of items) {
           const copies = itemCopies[it.id] || it.quantity || 1;
           const prod = resolveProductForTSPL(it);
+          const barcodeToPrint = it.barcode || it.batchNumber;
           bundledData +=
             printerProtocol === 'escpos'
               ? generateESCPOSLabel(prod, {
                   copies,
                   labelType,
                   labelSize,
-                  batchNumber: it.batchNumber,
+                  batchNumber: barcodeToPrint,
                   storeName: 'Chill&Chock',
                 })
               : generateTSPLLabel(prod, {
                   copies,
                   labelType,
                   labelSize,
-                  batchNumber: it.batchNumber,
+                  batchNumber: barcodeToPrint,
                   storeName: 'Chill&Chock',
                 });
         }
@@ -492,7 +506,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             <div className="flex items-center flex-wrap gap-2.5 shrink-0">
               {/* Label Size Selector */}
               <div className="flex items-center gap-1 bg-stone-100 p-0.5 rounded-full border border-stone-200">
-                {ORDERED_LABEL_SIZES.slice(0, 3).map((sizeKey) => {
+                {ORDERED_LABEL_SIZES.slice(0, 4).map((sizeKey) => {
                   const sCfg = LABEL_SIZE_CONFIGS[sizeKey];
                   const isSelected = labelSize === sizeKey;
                   return (
@@ -513,8 +527,21 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
                 })}
               </div>
 
-              {/* Printer Mode: XP-80TS (ESC/POS) vs TSPL */}
+              {/* Printer Mode: XP-365B (TSPL) vs XP-80TS (ESC/POS) */}
               <div className="flex items-center gap-1 bg-stone-100 p-0.5 rounded-full border border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setPrinterProtocol('tspl')}
+                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                    printerProtocol === 'tspl'
+                      ? 'bg-black text-white shadow-2xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                  title="Native TSPL command language for Xprinter XP-365B direct thermal label printer"
+                >
+                  <Printer className="w-3 h-3" />
+                  <span>XP-365B (TSPL)</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setPrinterProtocol('escpos')}
@@ -525,20 +552,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
                   }`}
                   title="Native ESC/POS hardware barcodes for Xprinter XP-80TS receipt & label printer"
                 >
-                  <Printer className="w-3 h-3" />
                   <span>XP-80TS (ESC/POS)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrinterProtocol('tspl')}
-                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                    printerProtocol === 'tspl'
-                      ? 'bg-black text-white shadow-2xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                  title="TSPL command language for dedicated label printers (XP-365B, Zebra, TSC)"
-                >
-                  <span>TSPL Mode</span>
                 </button>
               </div>
             </div>
@@ -553,8 +567,8 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
                   <tr>
                     <th className="py-1.5 px-2 w-[35px] text-center">#</th>
                     <th className="py-1.5 px-2">Product</th>
-                    <th className="py-1.5 px-2">Batch #</th>
-                    <th className="py-1.5 px-2 text-center">Scannable Barcode</th>
+                    <th className="py-1.5 px-2">Barcode</th>
+                    <th className="py-1.5 px-2 text-center">Barcode Preview</th>
                     <th className="py-1.5 px-2 text-center">Expiry</th>
                     <th className="py-1.5 px-2 text-right">Selling Price</th>
                     <th className="py-1.5 px-2 text-center w-[120px]">Print Copies</th>
@@ -593,23 +607,25 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
                           </div>
                         </td>
 
-                        {/* Batch # */}
+                        {/* Barcode */}
                         <td className="py-1 px-2 font-mono font-bold text-stone-700 whitespace-nowrap text-[11px]">
-                          {item.batchNumber}
+                          {item.barcode || item.batchNumber || '-'}
                         </td>
 
                         {/* Barcode Vector Preview */}
                         <td className="py-1 px-2 text-center">
-                          <div className="inline-flex flex-col items-center justify-center bg-white px-1.5 py-0.5 rounded border border-stone-200/90 shadow-2xs">
+                          <div className="inline-flex flex-col items-center justify-center bg-white px-1.5 py-0.5 rounded border border-stone-200/90 shadow-2xs w-full max-w-[130px]">
                             <Code39Barcode
-                              value={item.batchNumber}
+                              value={item.barcode || item.batchNumber}
                               height={16}
                               showText={false}
-                              className="max-w-[120px]"
+                              className="w-full max-w-[120px]"
                             />
-                            <span className="font-mono text-[7.5px] font-bold text-stone-600 tracking-wider">
-                              {item.batchNumber}
-                            </span>
+                            <div className="w-full max-w-[120px] flex justify-between font-mono text-[7.5px] font-bold text-stone-700 leading-none mt-0.5 px-0.5">
+                              {(item.barcode || item.batchNumber || '').split('').map((ch, i) => (
+                                <span key={i}>{ch}</span>
+                              ))}
+                            </div>
                           </div>
                         </td>
 
@@ -712,7 +728,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
                         productName={activeItem.productName}
                         weight={activeItem.weight}
                         price={activeItem.sellingPrice}
-                        barcode={activeItem.batchNumber}
+                        barcode={activeItem.barcode || activeItem.batchNumber}
                         storeName="Chill&Chock"
                         tagline="Cool vibe sweet bite"
                       />
@@ -755,7 +771,7 @@ export const StockBatchLabelPrintModal: React.FC<StockBatchLabelPrintModalProps>
             <div className="flex items-center gap-2 text-[10.5px] text-stone-500">
               <span className="font-bold text-stone-700">Xprinter Setup:</span>
               <span>
-                Insert your 30x22mm or 40x20mm label roll into your printer. Calibrate the 2mm gap sensor if needed.
+                Insert your 30x15mm, 30x22mm, or 40x20mm label roll into your XP-365B. Calibrate the 3mm gap sensor if needed.
               </span>
             </div>
 

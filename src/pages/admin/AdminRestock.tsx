@@ -30,12 +30,16 @@ import {
   AlertCircle,
   User,
   ChevronDown,
+  Pencil,
 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { StockBatchLabelPrintModal, RestockedItemForPrint } from '@/components/admin/StockBatchLabelPrintModal';
 import { PurchaseOrderDetailsModal } from '@/components/admin/PurchaseOrderDetailsModal';
+import { EditSupplierModal } from '@/components/admin/EditSupplierModal';
 import { getPaymentScheduleInfo } from '@/utils/paymentSchedule';
 import { formatDateYYYYMMDD, getDaysInMonth } from '@/utils/dateValidator';
+import { formatPhoneNumber, isValidPhoneNumber } from '@/utils/phoneValidator';
+import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
 
 export interface DraftLineItem {
   id: string;
@@ -130,6 +134,7 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
   onNavigateNext,
   onNavigatePrev,
 }) => {
+  const { showToast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -143,15 +148,15 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
     [products, item.productId]
   );
 
-  // Filter suggestions strictly for selected supplier products only
+  // Filter suggestions for selected supplier products with priority matching and fallback
   const suggestions = useMemo(() => {
     const q = (isTyping ? searchQuery : '').trim().toLowerCase();
     if (!q || q.length < 1) return [];
 
-    // Strictly products for the selected supplier
-    const supplierProducts = studioSupplierId ? supplierFilteredProducts : products;
+    // Selected supplier products pool
+    const pool = studioSupplierId && supplierFilteredProducts.length > 0 ? supplierFilteredProducts : products;
 
-    const matched = supplierProducts.filter(
+    let matched = pool.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         (p.sku && p.sku.toLowerCase().includes(q)) ||
@@ -160,15 +165,49 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
         (p.weight && p.weight.toLowerCase().includes(q))
     );
 
+    // If no match in supplierFilteredProducts, fallback to searching all products
+    if (matched.length === 0 && pool !== products) {
+      matched = products.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.sku && p.sku.toLowerCase().includes(q)) ||
+          (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+          (p.brand && p.brand.toLowerCase().includes(q)) ||
+          (p.weight && p.weight.toLowerCase().includes(q))
+      );
+    }
+
     matched.sort((a, b) => {
+      // 1. Exact barcode match gets highest priority
+      const aBarcode = a.barcode?.toLowerCase() === q ? 0 : 1;
+      const bBarcode = b.barcode?.toLowerCase() === q ? 0 : 1;
+      if (aBarcode !== bBarcode) return aBarcode - bBarcode;
+
+      // 2. Exact SKU match gets second priority
+      const aSku = a.sku?.toLowerCase() === q ? 0 : 1;
+      const bSku = b.sku?.toLowerCase() === q ? 0 : 1;
+      if (aSku !== bSku) return aSku - bSku;
+
+      // 3. Name starts with query
       const aStarts = a.name.toLowerCase().startsWith(q) ? 0 : 1;
       const bStarts = b.name.toLowerCase().startsWith(q) ? 0 : 1;
       if (aStarts !== bStarts) return aStarts - bStarts;
+
       return a.name.localeCompare(b.name);
     });
 
     return matched.slice(0, 10);
   }, [isTyping, searchQuery, studioSupplierId, supplierFilteredProducts, products]);
+
+  // Whenever productId changes or is updated, ensure typing/search state is cleared so product name shows
+  useEffect(() => {
+    if (item.productId) {
+      setIsTyping(false);
+      setSearchQuery('');
+      setIsOpen(false);
+      setActiveIndex(-1);
+    }
+  }, [item.productId]);
 
   // Click outside to close
   useEffect(() => {
@@ -200,8 +239,32 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
     }
   }, [activeIndex]);
 
+  const handleChoose = (prod: Product) => {
+    onSelectProduct(prod.id);
+    setIsOpen(false);
+    setIsTyping(false);
+    setSearchQuery('');
+    setActiveIndex(-1);
+    onNavigateNext();
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
+    const clean = val.trim().toLowerCase();
+
+    // If barcode scanner directly entered an exact barcode or SKU, immediately select it!
+    if (clean.length >= 3) {
+      const pool = studioSupplierId && supplierFilteredProducts.length > 0 ? supplierFilteredProducts : products;
+      const exactMatch =
+        pool.find((p) => p.barcode?.toLowerCase() === clean || p.sku?.toLowerCase() === clean) ||
+        products.find((p) => p.barcode?.toLowerCase() === clean || p.sku?.toLowerCase() === clean);
+
+      if (exactMatch) {
+        handleChoose(exactMatch);
+        return;
+      }
+    }
+
     setSearchQuery(val);
     setIsTyping(true);
     setActiveIndex(-1);
@@ -223,13 +286,15 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
     e.target.select();
   };
 
-  const handleChoose = (prod: Product) => {
-    onSelectProduct(prod.id);
-    setIsOpen(false);
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    // If focus moved inside container (like clear button or dropdown item), don't close
+    if (containerRef.current?.contains(e.relatedTarget as Node)) {
+      return;
+    }
     setIsTyping(false);
+    setIsOpen(false);
     setSearchQuery('');
     setActiveIndex(-1);
-    onNavigateNext();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -249,20 +314,54 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
         onNavigatePrev();
         return;
       }
+
+      const cleanQuery = searchQuery.trim().toLowerCase();
+
+      // 1. Check for exact barcode, SKU, or name match in products pool (handles barcode scanner Enter)
+      if (cleanQuery) {
+        const pool = studioSupplierId && supplierFilteredProducts.length > 0 ? supplierFilteredProducts : products;
+        const exactMatch =
+          pool.find(
+            (p) =>
+              p.barcode?.toLowerCase() === cleanQuery ||
+              p.sku?.toLowerCase() === cleanQuery ||
+              p.name.toLowerCase() === cleanQuery
+          ) ||
+          products.find(
+            (p) =>
+              p.barcode?.toLowerCase() === cleanQuery ||
+              p.sku?.toLowerCase() === cleanQuery ||
+              p.name.toLowerCase() === cleanQuery
+          );
+
+        if (exactMatch) {
+          e.preventDefault();
+          handleChoose(exactMatch);
+          return;
+        }
+      }
+
+      // 2. If dropdown active item selected
       if (isOpen && activeIndex >= 0 && activeIndex < suggestions.length) {
         e.preventDefault();
         handleChoose(suggestions[activeIndex]);
-      } else if (isOpen && suggestions.length === 1 && searchQuery.trim().length > 0) {
+        return;
+      }
+
+      // 3. If single suggestion or first suggestion available
+      if (suggestions.length > 0) {
         e.preventDefault();
         handleChoose(suggestions[0]);
-      } else if (item.productId) {
+        return;
+      }
+
+      // 4. If product already selected and just pressing Enter, advance to next field
+      if (item.productId) {
         e.preventDefault();
         setIsOpen(false);
         setIsTyping(false);
         onNavigateNext();
-      } else if (isOpen && suggestions.length > 0) {
-        e.preventDefault();
-        handleChoose(suggestions[0]);
+        return;
       }
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -295,9 +394,18 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
           id={`line-item-${idx}-product`}
           type="text"
           autoComplete="off"
+          disabled={!studioSupplierId}
           value={displayValue}
           onChange={handleInputChange}
-          onFocus={handleInputFocus}
+          onBlur={handleBlur}
+          onFocus={(e) => {
+            if (!studioSupplierId) {
+              showToast('Please select a supplier first', 'warning');
+              document.getElementById('studio-supplier-select')?.focus();
+              return;
+            }
+            handleInputFocus(e);
+          }}
           onKeyDown={handleKeyDown}
           placeholder={
             studioSupplierId
@@ -308,7 +416,7 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
             isOpen
               ? 'border-[#00b4b6] bg-stone-50/70'
               : 'border-transparent hover:border-stone-200'
-          }`}
+          } ${!studioSupplierId ? 'opacity-50 cursor-not-allowed' : ''}`}
         />
 
         {item.productId && (
@@ -337,6 +445,7 @@ export const LineItemProductAutocomplete: React.FC<LineItemProductAutocompletePr
       {isOpen && isTyping && searchQuery.trim().length >= 1 && (
         <div
           ref={dropdownRef}
+          onMouseDown={(e) => e.preventDefault()}
           className="absolute top-full left-0 mt-1 z-50 w-[360px] sm:w-[440px] max-w-[90vw] bg-white rounded-xl shadow-2xl border border-stone-200 overflow-hidden divide-y divide-stone-100 animate-in fade-in slide-in-from-top-1 duration-150 max-h-56 overflow-y-auto"
         >
           {suggestions.length === 0 ? (
@@ -458,6 +567,7 @@ export const AdminRestock: React.FC = () => {
   } | null>(null);
   const [viewingPO, setViewingPO] = useState<PurchaseOrder | null>(null);
   const [isNewSupplierModalOpen, setIsNewSupplierModalOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
 
   // Held restock bills state
   const [heldPOs, setHeldPOs] = useState<HeldPurchaseOrder[]>(loadHeldPOsFromStorage);
@@ -472,11 +582,39 @@ export const AdminRestock: React.FC = () => {
   const [newSupEmail, setNewSupEmail] = useState('');
   const [newSupAddress, setNewSupAddress] = useState('');
   const [newSupLeadTime, setNewSupLeadTime] = useState('2');
+  const [newSupIsCompany, setNewSupIsCompany] = useState(false);
   const [newSupProductIds, setNewSupProductIds] = useState<string[]>([]);
   const [supProductSearch, setSupProductSearch] = useState('');
 
+  // When Company Supplier is ticked, show only company products; when unticked, show only non-company products
+  const selectableNewSupProducts = useMemo(() => {
+    if (newSupIsCompany) {
+      return products.filter((p) => Boolean(p.isCompanyProduct));
+    }
+    return products.filter((p) => !p.isCompanyProduct);
+  }, [products, newSupIsCompany]);
+
+  // When toggling Company Supplier, keep only products matching the active mode
+  useEffect(() => {
+    if (newSupIsCompany) {
+      setNewSupProductIds((prev) =>
+        prev.filter((id) => products.find((p) => p.id === id)?.isCompanyProduct)
+      );
+    } else {
+      setNewSupProductIds((prev) =>
+        prev.filter((id) => !products.find((p) => p.id === id)?.isCompanyProduct)
+      );
+    }
+  }, [newSupIsCompany, products]);
+
   // --- Goods Inward Studio Form State ---
   const [studioSupplierId, setStudioSupplierId] = useState<string>('');
+  const selectedStudioSupplier = useMemo(
+    () => suppliers.find((s) => s.id === studioSupplierId),
+    [suppliers, studioSupplierId]
+  );
+  const isCompanySupplier = Boolean(selectedStudioSupplier?.isCompanySupplier);
+
   const [invoiceRef, setInvoiceRef] = useState<string>('');
   const [deliveryNotes, setDeliveryNotes] = useState<string>('');
   const [isUnpaidCredit, setIsUnpaidCredit] = useState(false);
@@ -491,6 +629,12 @@ export const AdminRestock: React.FC = () => {
 
   // Line items state
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([]);
+
+  // Helper to generate a unique batch number for non-company suppliers (clean, scannable)
+  const generateBatchNumber = (): string => {
+    const rand = Math.floor(100000 + Math.random() * 900000);
+    return `BAT-${rand}`;
+  };
 
   // Helper to create a new draft line item with clean empty values
   const createEmptyLineItem = (): DraftLineItem => ({
@@ -558,7 +702,7 @@ export const AdminRestock: React.FC = () => {
       const prefilledItem: DraftLineItem = {
         id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         productId: prod.id,
-        batchNumber: generateAutoBatchNumber(prod),
+        batchNumber: getProductBarcode(prod),
         expiryDate: `${nextYear} / 05 / 15`,
         costPrice: cost,
         profitMargin: margin,
@@ -572,20 +716,86 @@ export const AdminRestock: React.FC = () => {
     }
   }, [searchParams, products, suppliers, setSearchParams]);
 
-  // Helper to auto-generate a unique, realistic batch / lot number (e.g. LOT-KIT-040-97)
-  const generateAutoBatchNumber = (prod?: { sku?: string; name?: string }) => {
-    let cleanSku = 'LOT';
-    if (prod?.sku) {
-      cleanSku = prod.sku.replace(/^CC-/, '').toUpperCase();
-    } else if (prod?.name) {
-      cleanSku = prod.name.slice(0, 3).toUpperCase();
-    }
-    const rand = Math.floor(10 + Math.random() * 90);
-    return `LOT-${cleanSku}-${rand}`;
+  // Helper to get the product's barcode (clean, no separate batch number)
+  const getProductBarcode = (prod?: { barcode?: string; sku?: string }) => {
+    return prod?.barcode?.trim() || prod?.sku?.trim() || '';
   };
 
+  // Global Barcode Scanner listener when Goods Inward Studio is open
+  useBarcodeScanner({
+    enabled: isStudioOpen,
+    onScan: (scannedBarcode) => {
+      const clean = scannedBarcode.trim().toLowerCase();
+      if (!clean) return;
+
+      if (!studioSupplierId) {
+        showToast('Please select a supplier first before scanning products', 'warning');
+        document.getElementById('studio-supplier-select')?.focus();
+        return;
+      }
+
+      // Search matching product by barcode or SKU
+      const pool = supplierFilteredProducts.length > 0 ? supplierFilteredProducts : products;
+      const matchedProd =
+        pool.find((p) => p.barcode?.toLowerCase() === clean || p.sku?.toLowerCase() === clean) ||
+        products.find((p) => p.barcode?.toLowerCase() === clean || p.sku?.toLowerCase() === clean);
+
+      if (!matchedProd) {
+        showToast(`No product found with barcode "${scannedBarcode}"`, 'error');
+        return;
+      }
+
+      // Check if user is currently focused on an input within a specific line item
+      const activeEl = document.activeElement;
+      let targetRowIndex = -1;
+      if (activeEl && activeEl.id && activeEl.id.startsWith('line-item-')) {
+        const parts = activeEl.id.split('-');
+        const rowIdx = parseInt(parts[2], 10);
+        if (!isNaN(rowIdx) && rowIdx >= 0 && rowIdx < lineItems.length) {
+          targetRowIndex = rowIdx;
+        }
+      }
+      if (targetRowIndex === -1) {
+        // Check if there is an empty line item without a product
+        targetRowIndex = lineItems.findIndex((li) => !li.productId);
+      }
+
+      if (targetRowIndex >= 0) {
+        handleUpdateLineItem(lineItems[targetRowIndex].id, { productId: matchedProd.id });
+        focusField(targetRowIndex, 'expiry');
+        showToast(`Scanned: ${matchedProd.name}`, 'success');
+      } else {
+        const cost = matchedProd.costPrice && matchedProd.costPrice > 0 ? matchedProd.costPrice : Math.round(matchedProd.price * 0.78);
+        let margin = 25;
+        if (matchedProd.price > 0 && cost > 0) {
+          const calcM = Math.round((((matchedProd.price - cost) / cost) * 100) * 10) / 10;
+          margin = calcM > 0 ? calcM : 25;
+        }
+        const selling = matchedProd.price > 0 ? matchedProd.price : Math.round(cost * (1 + margin / 100));
+        const today = new Date();
+        const nextYear = today.getFullYear() + 1;
+
+        const newItem: DraftLineItem = {
+          id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          productId: matchedProd.id,
+          batchNumber: isCompanySupplier ? getProductBarcode(matchedProd) : generateBatchNumber(),
+          expiryDate: `${nextYear} / 05 / 15`,
+          costPrice: cost,
+          profitMargin: margin,
+          sellingPrice: selling,
+          quantity: 1,
+        };
+
+        const newIdx = lineItems.length;
+        setLineItems((prev) => [...prev, newItem]);
+        focusField(newIdx, 'expiry');
+        showToast(`Scanned: ${matchedProd.name}`, 'success');
+      }
+    },
+  });
+
   // Helper to focus table field programmatically
-  const focusField = (idx: number, field: 'product' | 'expiry' | 'cost' | 'margin' | 'sell' | 'qty') => {
+  const focusField = (idx: number, field: 'product' | 'barcode' | 'expiry' | 'cost' | 'margin' | 'sell' | 'qty') => {
     setTimeout(() => {
       const el = document.getElementById(`line-item-${idx}-${field}`) as HTMLInputElement | HTMLSelectElement | null;
       if (el) {
@@ -598,7 +808,14 @@ export const AdminRestock: React.FC = () => {
   };
 
   // Add Item to Studio (starts with clean empty values and auto-focuses its product dropdown)
-  const handleAddLineItem = () => {
+  const handleAddLineItem = (explicitSupplierId?: string) => {
+    const targetSupId = explicitSupplierId || studioSupplierId;
+    if (!targetSupId) {
+      showToast('Please select a supplier first before adding items', 'warning');
+      const supplierSelect = document.getElementById('studio-supplier-select');
+      supplierSelect?.focus();
+      return;
+    }
     const nextIdx = lineItems.length;
     setLineItems((prev) => [...prev, createEmptyLineItem()]);
     focusField(nextIdx, 'product');
@@ -608,7 +825,7 @@ export const AdminRestock: React.FC = () => {
   const handleKeyDownNav = (
     e: React.KeyboardEvent,
     idx: number,
-    field: 'product' | 'expiry' | 'cost' | 'margin' | 'sell' | 'qty'
+    field: 'product' | 'barcode' | 'expiry' | 'cost' | 'margin' | 'sell' | 'qty'
   ) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -618,11 +835,14 @@ export const AdminRestock: React.FC = () => {
         else if (field === 'sell') focusField(idx, 'margin');
         else if (field === 'margin') focusField(idx, 'cost');
         else if (field === 'cost') focusField(idx, 'expiry');
-        else if (field === 'expiry') focusField(idx, 'product');
+        else if (field === 'expiry') focusField(idx, 'barcode');
+        else if (field === 'barcode') focusField(idx, 'product');
         else if (field === 'product' && idx > 0) focusField(idx - 1, 'qty');
       } else {
         // Enter: Jump to next column
         if (field === 'product') {
+          focusField(idx, 'expiry');
+        } else if (field === 'barcode') {
           focusField(idx, 'expiry');
         } else if (field === 'expiry') {
           focusField(idx, 'cost');
@@ -664,8 +884,8 @@ export const AdminRestock: React.FC = () => {
         if (item.id !== id) return item;
         const updated = { ...item, ...updates };
 
-        // If product changed, update default batch & cost or reset to empty
-        if (updates.productId !== undefined && updates.productId !== item.productId) {
+        // If product changed or refreshed, update default batch & cost or reset to empty
+        if (updates.productId !== undefined) {
           if (!updates.productId) {
             updated.productId = '';
             updated.batchNumber = '';
@@ -687,7 +907,7 @@ export const AdminRestock: React.FC = () => {
               updated.costPrice = cost;
               updated.profitMargin = margin;
               updated.sellingPrice = selling;
-              updated.batchNumber = generateAutoBatchNumber(prod);
+              updated.batchNumber = isCompanySupplier ? getProductBarcode(prod) : generateBatchNumber();
               if (!item.expiryDate) {
                 const today = new Date();
                 const nextYear = today.getFullYear() + 1;
@@ -766,10 +986,20 @@ export const AdminRestock: React.FC = () => {
   // Filter products according to selected supplier
   const supplierFilteredProducts = useMemo(() => {
     if (!studioSupplierId) {
-      return products;
+      return [];
     }
 
+    const sup = suppliers.find((s) => s.id === studioSupplierId);
+    const isCompanySupplier = Boolean(sup?.isCompanySupplier);
+
     const filtered = products.filter((p) => {
+      // 0. Company Supplier match: only company products
+      if (isCompanySupplier) {
+        return Boolean(p.isCompanyProduct);
+      }
+      // If NOT company supplier, never include company products
+      if (p.isCompanyProduct) return false;
+
       // 1. Direct supplierId match
       if (p.supplierId && p.supplierId === studioSupplierId) return true;
       // 2. Batch supplierId match
@@ -777,7 +1007,6 @@ export const AdminRestock: React.FC = () => {
       // 3. Purchase order history match
       if (purchaseOrders.some((po) => po.supplierId === studioSupplierId && po.items.some((it) => it.productId === p.id))) return true;
       // 4. Supplier brand / suppliedProductIds match
-      const sup = suppliers.find((s) => s.id === studioSupplierId);
       if (sup) {
         if (sup.suppliedProductIds && sup.suppliedProductIds.includes(p.id)) return true;
         if (sup.brand && p.brand && sup.brand.toLowerCase() === p.brand.toLowerCase()) return true;
@@ -785,7 +1014,11 @@ export const AdminRestock: React.FC = () => {
       return false;
     });
 
-    return filtered.length > 0 ? filtered : products;
+    const fallback = isCompanySupplier
+      ? products.filter((p) => Boolean(p.isCompanyProduct))
+      : products.filter((p) => !p.isCompanyProduct);
+
+    return filtered.length > 0 ? filtered : fallback;
   }, [products, studioSupplierId, purchaseOrders, suppliers]);
 
   // Autofill full amount for payment methods
@@ -842,15 +1075,19 @@ export const AdminRestock: React.FC = () => {
 
     // Restock all items simultaneously into productStore & update live stock
     const restockItems = validItems.map((item) => {
+      const prod = products.find((p) => p.id === item.productId);
       const cost = typeof item.costPrice === 'number' ? item.costPrice : 0;
       const selling = typeof item.sellingPrice === 'number' ? item.sellingPrice : 0;
       const qty = typeof item.quantity === 'number' ? item.quantity : 1;
+      const batchVal = isCompanySupplier
+        ? (item.batchNumber.trim() || prod?.barcode || prod?.sku || generateBatchNumber())
+        : (item.batchNumber.trim() || generateBatchNumber());
 
       return {
         productId: item.productId,
         supplierId: selectedSupplier.id,
         supplierName: selectedSupplier.name,
-        batchNumber: item.batchNumber.trim() || `LOT-${Date.now().toString().slice(-4)}`,
+        batchNumber: batchVal,
         costPrice: cost,
         sellingPrice: selling,
         expiryDate: item.expiryDate || 'N/A',
@@ -867,14 +1104,14 @@ export const AdminRestock: React.FC = () => {
       const cost = typeof item.costPrice === 'number' ? item.costPrice : 0;
       const selling = typeof item.sellingPrice === 'number' ? item.sellingPrice : 0;
       const qty = typeof item.quantity === 'number' ? item.quantity : 1;
-      const batchNum = item.batchNumber.trim() || `LOT-${Date.now().toString().slice(-4)}`;
+      const barcodeVal = item.batchNumber.trim() || prod?.barcode || prod?.sku || '';
 
       return {
         id: `poi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         productId: item.productId,
         productName: prodName,
         weight: prodWeight,
-        batchNumber: batchNum,
+        batchNumber: barcodeVal,
         expiryDate: item.expiryDate || 'N/A',
         quantity: qty,
         costPrice: cost,
@@ -911,7 +1148,9 @@ export const AdminRestock: React.FC = () => {
       const cost = typeof item.costPrice === 'number' ? item.costPrice : (prod?.costPrice || 0);
       const selling = typeof item.sellingPrice === 'number' ? item.sellingPrice : (prod?.price || 0);
       const qty = typeof item.quantity === 'number' ? item.quantity : 1;
-      const batchNum = item.batchNumber.trim() || `LOT-${Date.now().toString().slice(-4)}`;
+      const finalCode = isCompanySupplier
+        ? (item.batchNumber.trim() || prod?.barcode || prod?.sku || '')
+        : (item.batchNumber.trim() || generateBatchNumber());
 
       return {
         id: item.id,
@@ -919,8 +1158,8 @@ export const AdminRestock: React.FC = () => {
         productName: prodName,
         weight: prodWeight,
         sku: prodSku,
-        barcode: prod?.barcode || '',
-        batchNumber: batchNum,
+        barcode: finalCode,
+        batchNumber: finalCode,
         expiryDate: item.expiryDate || 'N/A',
         costPrice: cost,
         sellingPrice: selling,
@@ -1041,9 +1280,14 @@ export const AdminRestock: React.FC = () => {
   const handleCreateSupplier = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSupName.trim()) return;
+    if (!isValidPhoneNumber(newSupPhone)) {
+      showToast('Please enter a valid 10-digit phone number', 'error');
+      return;
+    }
 
     const created = addSupplier({
       name: newSupName.trim(),
+      brand: newSupBrand.trim() || undefined,
       contactPerson: newSupContact.trim() || 'General Sales',
       phone: newSupPhone.trim() || '+94 11 000 0000',
       email: newSupEmail.trim() || undefined,
@@ -1052,6 +1296,7 @@ export const AdminRestock: React.FC = () => {
       rating: 4.8,
       status: 'Active',
       since: 'Sep 2026',
+      isCompanySupplier: newSupIsCompany,
       suppliedProductIds: newSupProductIds,
     });
 
@@ -1065,6 +1310,7 @@ export const AdminRestock: React.FC = () => {
     setNewSupEmail('');
     setNewSupAddress('');
     setNewSupLeadTime('2');
+    setNewSupIsCompany(false);
     setNewSupProductIds([]);
     setSupProductSearch('');
   };
@@ -1079,8 +1325,8 @@ export const AdminRestock: React.FC = () => {
         productName: it.productName,
         weight: it.weight || prod?.weight || '',
         sku: prod?.sku || '',
-        barcode: prod?.barcode || '',
-        batchNumber: it.batchNumber,
+        barcode: it.batchNumber || prod?.barcode || '',
+        batchNumber: it.batchNumber || prod?.barcode || '',
         expiryDate: it.expiryDate || 'N/A',
         costPrice: it.costPrice,
         sellingPrice: it.sellingPrice,
@@ -1456,6 +1702,9 @@ export const AdminRestock: React.FC = () => {
                     <th className="py-1.5 px-3 text-[9px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap min-w-[90px]">
                       Status
                     </th>
+                    <th className="py-1.5 px-3 text-[9px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-right min-w-[80px]">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 text-xs">
@@ -1478,6 +1727,11 @@ export const AdminRestock: React.FC = () => {
                               <span className="font-bold text-[10.5px] text-stone-900 leading-tight">
                                 {sup.name}
                               </span>
+                              {sup.isCompanySupplier && (
+                                <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200/80 leading-none">
+                                  Company
+                                </span>
+                              )}
                               {sup.brand && (
                                 <span className="text-[8.5px] text-amber-700 font-bold inline-flex items-center leading-normal">
                                   ({sup.brand})
@@ -1552,12 +1806,25 @@ export const AdminRestock: React.FC = () => {
                               <span>{sup.status}</span>
                             </span>
                           </td>
+
+                          {/* 7. Actions */}
+                          <td className="py-1.5 px-3 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => setEditingSupplier(sup)}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 hover:text-amber-900 transition-colors cursor-pointer"
+                              title={`Edit ${sup.name}`}
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+                          </td>
                         </tr>
                       );
                     })
                   ) : (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-zinc-400">
+                      <td colSpan={7} className="py-12 text-center text-zinc-400">
                         <Building2 className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
                         <p className="font-semibold text-xs text-zinc-600">No Suppliers found</p>
                         <p className="text-[11px] text-zinc-400 mt-0.5">
@@ -1570,7 +1837,7 @@ export const AdminRestock: React.FC = () => {
                   )}
                   {filteredSuppliers.length > 0 && (
                     <tr className="h-20 pointer-events-none">
-                      <td colSpan={6} className="border-0 bg-transparent"></td>
+                      <td colSpan={7} className="border-0 bg-transparent"></td>
                     </tr>
                   )}
                 </tbody>
@@ -1749,18 +2016,57 @@ export const AdminRestock: React.FC = () => {
                       <select
                         id="studio-supplier-select"
                         value={studioSupplierId}
-                        onChange={(e) => setStudioSupplierId(e.target.value)}
+                        onChange={(e) => {
+                          const newSupId = e.target.value;
+                          setStudioSupplierId(newSupId);
+                          const targetSup = suppliers.find((s) => s.id === newSupId);
+                          const isComp = Boolean(targetSup?.isCompanySupplier);
+
+                          // Update batch numbers for existing lines to reflect company barcode vs non-company batch
+                          setLineItems((prev) =>
+                            prev.map((item) => {
+                              if (!item.productId) return item;
+                              const prod = products.find((p) => p.id === item.productId);
+                              if (!prod) return item;
+                              if (isComp) {
+                                return { ...item, batchNumber: getProductBarcode(prod) };
+                              } else {
+                                const bc = getProductBarcode(prod);
+                                if (!item.batchNumber || item.batchNumber === bc) {
+                                  return { ...item, batchNumber: generateBatchNumber() };
+                                }
+                                return item;
+                              }
+                            })
+                          );
+
+                          if (newSupId && lineItems.length === 0) {
+                            setTimeout(() => {
+                              handleAddLineItem(newSupId);
+                            }, 50);
+                          } else if (!newSupId) {
+                            setLineItems((prev) => prev.filter((item) => !!item.productId));
+                          }
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
-                            if (lineItems.length === 0) {
-                              handleAddLineItem();
+                            if (e.currentTarget.value) {
+                              if (lineItems.length === 0) {
+                                handleAddLineItem(e.currentTarget.value);
+                              } else {
+                                focusField(0, 'product');
+                              }
                             } else {
-                              focusField(0, 'product');
+                              showToast('Please select a supplier first', 'warning');
                             }
                           }
                         }}
-                        className="bg-transparent border-0 border-b border-stone-300 focus:border-[#00b4b6] focus:outline-none rounded-none font-bold text-stone-800 text-[11px] py-0.5 pl-1 pr-5 max-w-[190px] sm:max-w-[240px] truncate cursor-pointer appearance-none transition-colors"
+                        className={`bg-transparent border-0 border-b ${
+                          !studioSupplierId
+                            ? 'border-amber-400 text-stone-700 font-bold'
+                            : 'border-stone-300 focus:border-[#00b4b6] text-stone-800'
+                        } focus:outline-none rounded-none font-bold text-[11px] py-0.5 pl-1 pr-5 max-w-[190px] sm:max-w-[240px] truncate cursor-pointer appearance-none transition-colors`}
                       >
                         <option value="">-- Select Supplier --</option>
                         {suppliers.map((s) => (
@@ -1800,8 +2106,13 @@ export const AdminRestock: React.FC = () => {
                   {/* + Add Item Button */}
                   <button
                     type="button"
-                    onClick={handleAddLineItem}
-                    className="px-3 py-1 rounded-full border border-[#00b4b6] text-[#00b4b6] hover:bg-[#00b4b6]/10 text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:scale-[1.02] active:scale-95 shrink-0"
+                    onClick={() => handleAddLineItem()}
+                    className={`px-3 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs shrink-0 ${
+                      !studioSupplierId
+                        ? 'border-stone-200 text-stone-400 hover:border-amber-400 hover:text-amber-600 hover:bg-amber-50/40'
+                        : 'border-[#00b4b6] text-[#00b4b6] hover:bg-[#00b4b6]/10 hover:scale-[1.02] active:scale-95'
+                    }`}
+                    title={!studioSupplierId ? 'Please select a supplier first' : 'Add Item (Enter)'}
                   >
                     <Plus className="w-3 h-3 stroke-[2.5]" />
                     <span>Add Item</span>
@@ -1977,7 +2288,9 @@ export const AdminRestock: React.FC = () => {
                       <tr className="text-[9px] font-black uppercase tracking-wider text-stone-500 whitespace-nowrap">
                         <th className="py-2 px-1 text-center">#</th>
                         <th className="py-2 px-2 text-left">Product</th>
-                        <th className="py-2 px-1.5 text-center">Batch #</th>
+                        <th className="py-2 px-1.5 text-center">
+                          {isCompanySupplier ? 'Barcode' : 'Batch Number'}
+                        </th>
                         <th className="py-2 px-1 text-center">Expiry</th>
                         <th className="py-2 px-1 text-right">Cost (Rs.)</th>
                         <th className="py-2 px-0.5 text-center">
@@ -1997,12 +2310,22 @@ export const AdminRestock: React.FC = () => {
                         <tr>
                           <td colSpan={10} className="py-14 text-center text-stone-400 select-none">
                             <div
-                              onClick={handleAddLineItem}
+                              onClick={() => handleAddLineItem()}
                               className="flex flex-col items-center justify-center gap-1 cursor-pointer group py-4"
                             >
-                              <p className="font-bold text-stone-700 text-xs">No Items in This Restock</p>
+                              <p className="font-bold text-stone-700 text-xs">
+                                {!studioSupplierId ? 'Please Select a Supplier First' : 'No Items in This Restock'}
+                              </p>
                               <p className="text-[10.5px] text-stone-400">
-                                Click <span className="font-bold text-[#00b4b6] underline underline-offset-2">+ Add Item</span> or press <kbd className="px-1.5 py-0.5 bg-stone-100 rounded text-[9px] font-mono font-bold text-stone-600 border border-stone-200">Enter</kbd> to begin.
+                                {!studioSupplierId ? (
+                                  <span>
+                                    Choose a <span className="font-bold text-[#00b4b6] underline underline-offset-2">Supplier</span> above before adding products.
+                                  </span>
+                                ) : (
+                                  <span>
+                                    Click <span className="font-bold text-[#00b4b6] underline underline-offset-2">+ Add Item</span> or press <kbd className="px-1.5 py-0.5 bg-stone-100 rounded text-[9px] font-mono font-bold text-stone-600 border border-stone-200">Enter</kbd> to begin.
+                                  </span>
+                                )}
                               </p>
                             </div>
                           </td>
@@ -2036,11 +2359,29 @@ export const AdminRestock: React.FC = () => {
                                 />
                               </td>
 
-                              {/* Auto-generated Batch # (Balanced column, no regenerate button) */}
+                              {/* Product Barcode or Batch Number */}
                               <td className="py-2 px-1.5 text-center">
-                                <span className="font-mono font-bold text-stone-800 text-[11px] select-all block truncate">
-                                  {item.batchNumber || '-'}
-                                </span>
+                                <input
+                                  id={`line-item-${idx}-barcode`}
+                                  type="text"
+                                  value={item.batchNumber}
+                                  onChange={(e) =>
+                                    handleUpdateLineItem(item.id, { batchNumber: e.target.value })
+                                  }
+                                  onFocus={(e) => e.target.select()}
+                                  onKeyDown={(e) => handleKeyDownNav(e, idx, 'barcode')}
+                                  placeholder={isCompanySupplier ? 'No Barcode' : 'BAT-XXXXXX'}
+                                  title={
+                                    item.batchNumber
+                                      ? isCompanySupplier
+                                        ? `Company Barcode: ${item.batchNumber}`
+                                        : `Batch Number: ${item.batchNumber}`
+                                      : isCompanySupplier
+                                      ? 'Enter or scan product barcode'
+                                      : 'Enter unique batch number'
+                                  }
+                                  className="w-full bg-transparent border-0 border-b-2 border-transparent hover:border-stone-200 focus:border-[#00b4b6] focus:outline-none font-mono font-bold text-[11px] text-stone-800 text-center py-0.5 placeholder:text-stone-300 transition-colors truncate"
+                                />
                               </td>
 
                               {/* Expiry Date (YYYY / MM / DD auto-formatting & auto-jump to Cost) */}
@@ -2240,7 +2581,7 @@ export const AdminRestock: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleCreateSupplier}
-                  disabled={!newSupName.trim() || !newSupPhone.trim()}
+                  disabled={!newSupName.trim() || !isValidPhoneNumber(newSupPhone)}
                   className="px-3.5 sm:px-4 py-1 rounded-full bg-[#00b4b6] hover:bg-[#009ca0] disabled:opacity-40 text-white text-[11px] font-bold shadow-sm transition-all cursor-pointer disabled:cursor-not-allowed active:scale-95"
                 >
                   Confirm &amp; Register Supplier
@@ -2305,6 +2646,17 @@ export const AdminRestock: React.FC = () => {
                           required
                           className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-1 focus:ring-[#00b4b6]"
                         />
+                        <div className="pt-1.5">
+                          <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={newSupIsCompany}
+                              onChange={(e) => setNewSupIsCompany(e.target.checked)}
+                              className="w-3.5 h-3.5 text-[#00b4b6] rounded border-stone-300 focus:ring-0 cursor-pointer accent-[#00b4b6]"
+                            />
+                            <span className="text-[11px] font-bold text-stone-700">Company Supplier</span>
+                          </label>
+                        </div>
                       </div>
 
                       {/* Row 2: Contact Person + Phone Number */}
@@ -2327,12 +2679,13 @@ export const AdminRestock: React.FC = () => {
                             Phone Number *
                           </label>
                           <input
-                            type="text"
+                            type="tel"
                             value={newSupPhone}
-                            onChange={(e) => setNewSupPhone(e.target.value)}
-                            placeholder="e.g., +94 77 123 4567"
+                            onChange={(e) => setNewSupPhone(formatPhoneNumber(e.target.value))}
+                            placeholder="077 123 4567"
+                            maxLength={12}
                             required
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-1 focus:ring-[#00b4b6]"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-1 focus:ring-[#00b4b6] font-mono"
                           />
                         </div>
                       </div>
@@ -2395,27 +2748,11 @@ export const AdminRestock: React.FC = () => {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-xs font-bold text-stone-800 whitespace-nowrap">Assign Supplying Products</span>
                       <span className="text-[10.5px] text-stone-400 whitespace-nowrap">
-                        ({newSupProductIds.length}/{products.length})
+                        ({newSupProductIds.filter((id) => selectableNewSupProducts.some((p) => p.id === id)).length}/{selectableNewSupProducts.length})
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 flex-1 sm:flex-initial justify-end">
-                      {/* Quick Select All / Clear All */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const allIds = products.map((p) => p.id);
-                          if (newSupProductIds.length === products.length) {
-                            setNewSupProductIds([]);
-                          } else {
-                            setNewSupProductIds(allIds);
-                          }
-                        }}
-                        className="px-2.5 py-1 rounded-lg border border-stone-200 bg-white hover:bg-stone-50 text-[10.5px] font-bold text-stone-600 transition-colors cursor-pointer shrink-0"
-                      >
-                        {newSupProductIds.length === products.length ? 'Clear All' : 'Select All'}
-                      </button>
-
                       {/* Search inside Catalogue */}
                       <div className="relative w-full sm:w-44 md:w-56">
                         <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
@@ -2438,12 +2775,13 @@ export const AdminRestock: React.FC = () => {
                           <th className="py-2 px-2.5 w-9 text-center">
                             <input
                               type="checkbox"
-                              checked={products.length > 0 && newSupProductIds.length === products.length}
+                              checked={selectableNewSupProducts.length > 0 && selectableNewSupProducts.every((p) => newSupProductIds.includes(p.id))}
                               onChange={(e) => {
+                                const allIds = selectableNewSupProducts.map((p) => p.id);
                                 if (e.target.checked) {
-                                  setNewSupProductIds(products.map((p) => p.id));
+                                  setNewSupProductIds((prev) => Array.from(new Set([...prev, ...allIds])));
                                 } else {
-                                  setNewSupProductIds([]);
+                                  setNewSupProductIds((prev) => prev.filter((id) => !allIds.includes(id)));
                                 }
                               }}
                               className="w-3.5 h-3.5 text-[#00b4b6] rounded focus:ring-0 cursor-pointer"
@@ -2456,7 +2794,7 @@ export const AdminRestock: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
-                        {products
+                        {selectableNewSupProducts
                           .filter((p) => {
                             if (!supProductSearch.trim()) return true;
                             const q = supProductSearch.trim().toLowerCase();
@@ -2514,6 +2852,25 @@ export const AdminRestock: React.FC = () => {
                               </tr>
                             );
                           })}
+
+                        {selectableNewSupProducts.filter((p) => {
+                          if (!supProductSearch.trim()) return true;
+                          const q = supProductSearch.trim().toLowerCase();
+                          return (
+                            p.name.toLowerCase().includes(q) ||
+                            p.sku.toLowerCase().includes(q) ||
+                            (p.brand && p.brand.toLowerCase().includes(q)) ||
+                            (p.category && p.category.toLowerCase().includes(q))
+                          );
+                        }).length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-xs text-stone-400">
+                              {newSupIsCompany
+                                ? 'No company products found. Mark products as "Company Product" in Catalog.'
+                                : 'No products found.'}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -2634,6 +2991,17 @@ export const AdminRestock: React.FC = () => {
           invoiceRef={lastRestockedData.invoiceRef}
           supplierName={lastRestockedData.supplierName}
           items={lastRestockedData.items}
+        />
+      )}
+
+      {/* ========================================================================= */}
+      {/* EDIT SUPPLIER MODAL                                                       */}
+      {/* ========================================================================= */}
+      {editingSupplier && (
+        <EditSupplierModal
+          isOpen={!!editingSupplier}
+          onClose={() => setEditingSupplier(null)}
+          supplier={editingSupplier}
         />
       )}
     </AdminLayout>

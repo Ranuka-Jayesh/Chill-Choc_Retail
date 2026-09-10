@@ -93,8 +93,30 @@ export function getProductSupplierOptions(
     return Array.from(supplierMap.values()).map((opt) => {
       const inCart = getSupplierInCartQty(opt.supplierId, opt.supplierName);
       const available = Math.max(0, opt.totalStock - inCart);
+
+      // Filter out out-of-stock batches so cashier only sees and chooses from in-stock batches
+      const activeBatches = (opt.batches || []).filter((b) => {
+        const batchInCart = inCartAllocations
+          .filter(
+            (a) =>
+              (a.batchId && a.batchId === b.id) ||
+              (a.batchNumber && a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase())
+          )
+          .reduce((sum, a) => sum + a.quantity, 0);
+        return (b.quantityRemaining ?? 0) - batchInCart > 0;
+      });
+
+      const firstActive = activeBatches[0];
+
       return {
         ...opt,
+        batches: activeBatches,
+        batchCount: activeBatches.length,
+        batchNumber: firstActive ? firstActive.batchNumber : opt.batchNumber,
+        batchId: firstActive ? firstActive.id : opt.batchId,
+        costPrice: firstActive?.costPrice ?? opt.costPrice,
+        expiryDate: firstActive?.expiryDate ?? opt.expiryDate,
+        totalStock: activeBatches.reduce((sum, b) => sum + (b.quantityRemaining ?? 0), 0),
         inCartQty: inCart,
         stock: available,
         isStockOver: available <= 0,
@@ -113,7 +135,7 @@ export function getProductSupplierOptions(
         supplierId: product.supplierId || 'sup-default',
         supplierName: product.supplierName || matchedSup?.name || 'Default Supplier',
         supplierCode: matchedSup?.code || 'SUP-01',
-        batchNumber: `LOT-${product.sku}`,
+        batchNumber: product.barcode || product.sku || 'BATCH-01',
         batchCount: 1,
         batches: [],
         totalStock: product.stock,
@@ -198,30 +220,34 @@ export const SupplierSelectModal: React.FC<SupplierSelectModalProps> = ({
     const inCartItem = cartItems.find((ci) => ci.product.id === product.id);
     const inCartAllocations = inCartItem?.batchAllocations || [];
 
-    return selectedSupplier.batches.map((b) => {
-      const inCart = inCartAllocations
-        .filter(
-          (a) =>
-            (a.batchId && a.batchId === b.id) ||
-            (a.batchNumber && a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase())
-        )
-        .reduce((sum, a) => sum + a.quantity, 0);
+    return selectedSupplier.batches
+      .map((b) => {
+        const inCart = inCartAllocations
+          .filter(
+            (a) =>
+              (a.batchId && a.batchId === b.id) ||
+              (a.batchNumber && a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase())
+          )
+          .reduce((sum, a) => sum + a.quantity, 0);
 
-      const available = Math.max(0, (b.quantityRemaining ?? 0) - inCart);
-      return {
-        ...b,
-        inCartQty: inCart,
-        stock: available,
-        isStockOver: available <= 0,
-      };
-    });
+        const available = Math.max(0, (b.quantityRemaining ?? 0) - inCart);
+        return {
+          ...b,
+          inCartQty: inCart,
+          stock: available,
+          isStockOver: available <= 0,
+        };
+      })
+      .filter((b) => !b.isStockOver && b.stock > 0);
   }, [selectedSupplier, product, cartItems]);
 
   // Filter items based on active step and search query
   const filteredSuppliers = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return options;
-    return options.filter((opt) => opt.supplierName.toLowerCase().includes(query));
+    const inStock = options.filter((opt) => !opt.isStockOver && opt.stock > 0);
+    const baseList = inStock.length > 0 ? inStock : options;
+    if (!query) return baseList;
+    return baseList.filter((opt) => opt.supplierName.toLowerCase().includes(query));
   }, [options, search]);
 
   const filteredBatches = useMemo(() => {
@@ -254,17 +280,31 @@ export const SupplierSelectModal: React.FC<SupplierSelectModalProps> = ({
 
   const handleChooseSupplier = (chosen: ProductSupplierOption) => {
     // If supplier is completely out of stock
-    if (chosen.isStockOver) {
-      const availableSuppliers = options.filter((o) => !o.isStockOver);
+    if (chosen.isStockOver || chosen.stock <= 0) {
+      const availableSuppliers = options.filter((o) => !o.isStockOver && o.stock > 0);
       if (onSupplierStockOver) {
         onSupplierStockOver(chosen, availableSuppliers, null, []);
       }
       return;
     }
 
-    // If supplier has multiple batches, prompt cashier to select the batch!
-    const batches = chosen.batches || [];
-    if (batches.length > 1) {
+    const inCartItem = cartItems.find((ci) => ci.product.id === product?.id);
+    const inCartAllocations = inCartItem?.batchAllocations || [];
+
+    // Filter in-stock batches
+    const inStockBatches = (chosen.batches || []).filter((b) => {
+      const inCart = inCartAllocations
+        .filter(
+          (a) =>
+            (a.batchId && a.batchId === b.id) ||
+            (a.batchNumber && a.batchNumber.toLowerCase() === b.batchNumber.toLowerCase())
+        )
+        .reduce((sum, a) => sum + a.quantity, 0);
+      return (b.quantityRemaining ?? 0) - inCart > 0;
+    });
+
+    // If supplier has multiple in-stock batches, prompt cashier to select the batch!
+    if (inStockBatches.length > 1) {
       setSelectedSupplier(chosen);
       setStep('batch');
       setSearch('');
@@ -275,11 +315,10 @@ export const SupplierSelectModal: React.FC<SupplierSelectModalProps> = ({
       return;
     }
 
-    // Only 1 batch exists
-    if (batches.length === 1) {
-      const singleB = batches[0];
-      const inCartItem = cartItems.find((ci) => ci.product.id === product?.id);
-      const inCart = (inCartItem?.batchAllocations || [])
+    // Only 1 in-stock batch exists
+    if (inStockBatches.length === 1) {
+      const singleB = inStockBatches[0];
+      const inCart = inCartAllocations
         .filter(
           (a) =>
             (a.batchId && a.batchId === singleB.id) ||
@@ -296,7 +335,7 @@ export const SupplierSelectModal: React.FC<SupplierSelectModalProps> = ({
       };
 
       if (available <= 0) {
-        const availableSuppliers = options.filter((o) => !o.isStockOver);
+        const availableSuppliers = options.filter((o) => !o.isStockOver && o.stock > 0);
         if (onSupplierStockOver) {
           onSupplierStockOver(chosen, availableSuppliers, batchOpt, []);
         }
@@ -584,8 +623,10 @@ export const SupplierSelectModal: React.FC<SupplierSelectModalProps> = ({
               /* STEP 2: Batches List for Selected Supplier */
               filteredBatches.length === 0 ? (
                 <div className="py-6 text-center text-zinc-400">
-                  <p className="text-xs font-bold text-black">No batches found</p>
-                  <p className="text-[10px] text-zinc-400 mt-0.5">Try searching a different batch</p>
+                  <p className="text-xs font-bold text-black">No in-stock batches found</p>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                    {search ? 'Try searching a different batch number' : 'All batches for this supplier are currently out of stock'}
+                  </p>
                 </div>
               ) : (
                 filteredBatches.map((b, index) => {

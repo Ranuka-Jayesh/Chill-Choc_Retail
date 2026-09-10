@@ -22,6 +22,7 @@ export interface Supplier {
   status: 'Active' | 'Inactive';
   since?: string;
   suppliedProductIds?: string[];
+  isCompanySupplier?: boolean;
 }
 
 export interface ProductBatch {
@@ -58,6 +59,7 @@ export interface Product {
   expiryDate?: string;
   supplierId?: string;
   supplierName?: string;
+  isCompanyProduct?: boolean;
 }
 
 export interface Salesperson {

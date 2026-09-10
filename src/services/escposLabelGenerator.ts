@@ -1,7 +1,7 @@
 import { Product } from '@/types';
 import { extractProductMeasurement } from './labelConfig';
 
-export type LabelSize = '30x20' | '30x22' | '35x25' | '40x20' | '40x25' | '40x30' | '50x30';
+export type LabelSize = '30x15' | '30x20' | '30x22' | '35x25' | '40x20' | '40x25' | '40x30' | '50x30';
 
 export interface ESCPOSLabelOptions {
   copies?: number;
@@ -45,7 +45,8 @@ import JsBarcode from 'jsbarcode';
 export function generateBarcodeSvgHtml(
   value: string,
   height: number = 20,
-  maxBarWidthMm: number = 34
+  maxBarWidthMm: number = 34,
+  showText: boolean = true
 ): string {
   const clean = (value || 'LOT-001').trim();
   if (typeof document !== 'undefined') {
@@ -53,19 +54,41 @@ export function generateBarcodeSvgHtml(
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       JsBarcode(svg, clean, {
         format: 'CODE128',
-        width: 1.1,
+        width: 1.0,
         height: height,
         displayValue: false,
-        margin: 2,
-        background: '#ffffff',
-        lineColor: '#000000',
+        margin: 0,
       });
-      svg.setAttribute(
-        'style',
-        `width:100%;max-width:${maxBarWidthMm}mm;height:${height}px;display:block;margin:0 auto;`
-      );
-      svg.setAttribute('shape-rendering', 'crispEdges');
-      return new XMLSerializer().serializeToString(svg);
+
+      const barGroup = svg.children[1] || svg.children[0];
+      if (barGroup && barGroup.children) {
+        let maxRight = 0;
+        const rawBars: Array<{ x: number; width: number }> = [];
+        for (let i = 0; i < barGroup.children.length; i++) {
+          const el = barGroup.children[i] as SVGElement;
+          const x = parseFloat(el.getAttribute('x') || '0');
+          const width = parseFloat(el.getAttribute('width') || '0');
+          rawBars.push({ x, width });
+          if (x + width > maxRight) maxRight = x + width;
+        }
+
+        const totalWidth = maxRight || 100;
+        const textHeight = showText ? 9.5 : 0;
+        const totalHeight = height + textHeight;
+
+        const rectsSvg = rawBars
+          .map(
+            (b) =>
+              `<rect x="${b.x.toFixed(2)}" y="0" width="${b.width.toFixed(2)}" height="${height}" fill="#000000" shape-rendering="crispEdges"/>`
+          )
+          .join('');
+
+        const textSvg = showText
+          ? `<text x="0" y="${(height + 7.8).toFixed(1)}" textLength="${totalWidth.toFixed(2)}" lengthAdjust="spacing" text-anchor="start" fill="#000000" font-family="'Courier New', Courier, monospace, sans-serif" font-weight="800" font-size="7.5">${clean}</text>`
+          : '';
+
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth.toFixed(2)} ${totalHeight}" style="width:100%;max-width:${maxBarWidthMm}mm;height:auto;display:block;margin:0 auto;" shape-rendering="crispEdges"><rect width="${totalWidth.toFixed(2)}" height="${totalHeight}" fill="#ffffff"/>${rectsSvg}${textSvg}</svg>`;
+      }
     } catch (e) {
       console.warn('JsBarcode Code 128 generation error, falling back:', e);
     }
@@ -123,6 +146,33 @@ function generateRawCode39SvgHtml(value: string, height: number = 36, maxBarWidt
   });
 
   return `<svg viewBox="0 0 ${totalWidth} ${height}" width="${totalWidth}" height="${height}" style="width:100%;max-width:${Math.min(maxBarWidth, totalWidth)}px;height:${height}px;display:block;margin:0 auto;" shape-rendering="crispEdges"><rect width="${totalWidth}" height="${height}" fill="#ffffff" />${rectsSvg}</svg>`;
+}
+
+/**
+ * Format barcode digits with spaces to match the full width of the barcode in ESC/POS
+ */
+function formatFullWidthBarcodeDigitsEscpos(barcode: string, totalDots: number): string {
+  const clean = barcode.trim();
+  if (clean.length <= 1) return clean;
+  // Font A in ESC/POS is 12x24 dots glyph + 2 dots character cell spacing = ~14 dots pitch
+  const charPitchDots = 14;
+  const availableChars = Math.floor(totalDots / charPitchDots);
+  if (availableChars <= clean.length) return clean;
+
+  const totalSpaces = availableChars - clean.length;
+  const gaps = clean.length - 1;
+  const baseSpaces = Math.floor(totalSpaces / gaps);
+  const extraSpaces = totalSpaces % gaps;
+
+  let result = '';
+  for (let i = 0; i < clean.length; i++) {
+    result += clean[i];
+    if (i < gaps) {
+      const spacesCount = baseSpaces + (i < extraSpaces ? 1 : 0);
+      result += ' '.repeat(spacesCount);
+    }
+  }
+  return result;
 }
 
 /**
@@ -191,7 +241,9 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
   // 64 dots = 8.0mm (for 25mm labels)
   // 80 dots = 10.0mm (for 30mm labels)
   let barcodeHeightHex = '\x30'; // 48 dots default (6.0 mm)
-  if (labelSize === '30x20' || labelSize === '40x20') {
+  if (labelSize === '30x15') {
+    barcodeHeightHex = '\x24'; // 36 dots (4.5 mm) for 15mm compact labels
+  } else if (labelSize === '30x20' || labelSize === '40x20') {
     barcodeHeightHex = '\x30'; // 48 dots (6.0 mm)
   } else if (labelSize === '30x22') {
     barcodeHeightHex = '\x34'; // 52 dots (6.5 mm) - responsive extra clearance
@@ -208,20 +260,25 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
   const code128Data = `{B${cleanBarcode}`;
   const BARCODE_PRINT = `${GS}k\x49${String.fromCharCode(code128Data.length)}${code128Data}`;
 
-  const CMD_FEED = labelSize === '30x20' || labelSize === '30x22' || labelSize === '40x20' ? `${ESC}d\x01` : `${ESC}d\x02`;
+  const CMD_FEED = labelSize === '30x15' || labelSize === '30x20' || labelSize === '30x22' || labelSize === '40x20' ? `${ESC}d\x01` : `${ESC}d\x02`;
   const CMD_FEED_SEPARATION = `${ESC}d\x01`;
 
   const { cleanTitle, measurement } = extractProductMeasurement(cleanName, cleanWeight);
-  const titleLines = wrapProductTitle(cleanTitle, labelSize === '30x20' || labelSize === '30x22' ? 22 : 28);
+  const titleLines = wrapProductTitle(cleanTitle, labelSize === '30x15' ? 18 : labelSize === '30x20' || labelSize === '30x22' ? 22 : 28);
   const measurementSuffix = measurement ? ` / ${measurement}` : '';
+
+  // Exact Code 128 Set B module width: (N chars + 2 control/checksum) * 11 modules + 15 stop modules
+  const exactModules = (cleanBarcode.length + 2) * 11 + 15;
+  const barcodeDots = exactModules * 2;
+  const fullWidthBarcodeDigits = formatFullWidthBarcodeDigitsEscpos(cleanBarcode, barcodeDots);
 
   const singleLabel = [
     CMD_ALIGN_CENTER,
     CMD_LINE_SPACING_RESET,
-    // 1. Shop Name: Bold, largest brand text, horizontally centered
-    `${FONT_BRAND}${storeName}${FONT_NORMAL}\n`,
-    // 2. Tagline: Much smaller than shop name, regular/medium (omitted on 20mm/22mm labels for barcode safety)
-    ...(labelSize !== '30x20' && labelSize !== '30x22' && labelSize !== '40x20' ? [`${FONT_SMALL}${tagline}${FONT_NORMAL}\n`] : []),
+    // 1. Shop Name: Bold, largest brand text, horizontally centered (omitted on 15mm for clean space)
+    ...(labelSize !== '30x15' ? [`${FONT_BRAND}${storeName}${FONT_NORMAL}\n`] : []),
+    // 2. Tagline: Much smaller than shop name, regular/medium (omitted on 15mm/20mm/22mm labels for barcode safety)
+    ...(labelSize !== '30x15' && labelSize !== '30x20' && labelSize !== '30x22' && labelSize !== '40x20' ? [`${FONT_SMALL}${tagline}${FONT_NORMAL}\n`] : []),
     // 3. Product Name: Bold font, centered, max 2 lines
     ...titleLines.map((line) => `${FONT_BOLD}${line}${FONT_NORMAL}\n`),
     // 4. Price: Very bold, large, prominent
@@ -231,8 +288,8 @@ export function generateESCPOSLabel(product: Product, options: ESCPOSLabelOption
     BARCODE_WIDTH,
     BARCODE_HRI_OFF,
     BARCODE_PRINT,
-    // 6. Barcode Human-Readable Digits: Clean, centered, bold
-    `${FONT_BOLD}${cleanBarcode}${FONT_NORMAL}\n`,
+    // 6. Barcode Human-Readable Digits: Clean, centered, bold, full width
+    `${FONT_BOLD}${fullWidthBarcodeDigits}${FONT_NORMAL}\n`,
     CMD_FEED,
   ].join('');
 

@@ -603,7 +603,7 @@ export const PosScreen: React.FC = () => {
     const supplierOptions = getProductSupplierOptions(product, allSuppliers, items);
     
     // Check if all options are stock over
-    const availableOptions = supplierOptions.filter((o) => !o.isStockOver);
+    const availableOptions = supplierOptions.filter((o) => !o.isStockOver && o.stock > 0);
     if (supplierOptions.length > 0 && availableOptions.length === 0) {
       setStockOverData({
         product,
@@ -614,32 +614,32 @@ export const PosScreen: React.FC = () => {
       return;
     }
 
-    // If product has more than 1 supplier, prompt cashier to select supplier
-    if (supplierOptions.length > 1) {
+    // If product has more than 1 available supplier, prompt cashier to select supplier
+    if (availableOptions.length > 1) {
       setSupplierSelectData({
         product,
-        options: supplierOptions,
+        options: availableOptions,
         initialStep: 'supplier',
       });
       return;
     }
 
     // Single supplier
-    const firstOption = supplierOptions[0];
+    const firstOption = availableOptions[0] || supplierOptions[0];
     if (firstOption) {
-      // If that single supplier has more than 1 batch, open batch selection!
+      // If that supplier has more than 1 in-stock batch, open batch selection!
       if (firstOption.batches && firstOption.batches.length > 1) {
         setSupplierSelectData({
           product,
-          options: supplierOptions,
+          options: availableOptions.length > 0 ? availableOptions : supplierOptions,
           initialStep: 'batch',
           initialSupplier: firstOption,
         });
         return;
       }
 
-      // Single batch
-      if (firstOption.isStockOver) {
+      // Single batch or out of stock
+      if (firstOption.isStockOver || firstOption.stock <= 0) {
         setStockOverData({
           product,
           exceededSupplier: firstOption,

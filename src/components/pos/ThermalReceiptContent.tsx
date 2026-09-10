@@ -94,9 +94,9 @@ export const ThermalReceiptContent: React.FC<ThermalReceiptContentProps> = ({
           className="w-40 max-w-[75%] h-auto object-contain mb-0.5"
         />
         <p className="text-[9.5px] text-black font-bold leading-tight">
-          No. 42, Galle Road, Colombo 03, Sri Lanka
+          No 447/1, Debarawewa, Tissamaharama
           <br />
-          Tel: +94 11 234 5678
+          Call / WhatsApp: 076 900 7273
         </p>
       </div>
 

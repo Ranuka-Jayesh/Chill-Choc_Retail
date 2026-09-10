@@ -32,6 +32,33 @@ export interface LabelSizeDefinition {
 }
 
 export const LABEL_SIZE_CONFIGS: Record<LabelSize, LabelSizeDefinition> = {
+  '30x15': {
+    id: '30x15',
+    name: '30 × 15 mm',
+    widthMm: 30,
+    heightMm: 15,
+    badge: 'XP-365B (Roll)',
+    badgeClass: 'bg-zinc-900 text-white border-black',
+    badgeActiveRing: 'ring-black',
+    description: 'Compact 30×15mm DTTC roll for Xprinter XP-365B (Product Name, Barcode & Price)',
+    showTagline: false,
+    brandFontSizePt: 5.5,
+    taglineFontSizePt: 0,
+    titleFontSizePt: 5.8,
+    priceFontSizePt: 7.8,
+    barcodeSvgHeight: 18,
+    barcodeMaxBarWidth: 150,
+    barcodeFontSizePt: 4.2,
+    pagePadding: '0.3mm 0.6mm',
+    previewWidthPx: 240,
+    previewHeightPx: 120,
+    previewBrandClass: 'hidden',
+    previewTaglineClass: 'hidden',
+    previewTitleClass: 'font-sans font-bold text-[11px] text-black leading-tight',
+    previewPriceClass: 'font-sans font-black text-[14px] text-black leading-none tracking-tight mt-0.5',
+    previewBarcodeHeight: 22,
+    previewBarcodeTextClass: 'font-mono font-bold text-[9px] text-black leading-none tracking-wider mt-0.5',
+  },
   '40x20': {
     id: '40x20',
     name: '40 × 20 mm',
@@ -224,6 +251,7 @@ export const LABEL_SIZE_CONFIGS: Record<LabelSize, LabelSizeDefinition> = {
 };
 
 export const ORDERED_LABEL_SIZES: LabelSize[] = [
+  '30x15',
   '30x22',
   '40x20',
   '30x20',
